@@ -23,7 +23,7 @@
   left: 50%;
   transform: translate(-50%, -50%);
   width: min(92%, 440px);
-  height: min(65%, 220px);
+  height: min(55%, 180px);
   pointer-events: none;
   border: 2px solid rgba(255, 255, 255, 0.25);
   border-radius: 14px;

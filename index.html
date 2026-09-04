@@ -31,7 +31,7 @@
   <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
 
   <!-- Html5Qrcode CDN -->
-  <script src="https://unpkg.com/html5-qrcode"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 
   <!-- Custom Stylesheet -->
   <link rel="stylesheet" href="css/styles.css">
@@ -107,11 +107,6 @@
           </div>
 
           <div class="flex items-center gap-2">
-            <!-- Switch Camera Lens button (visible if device has multiple cameras) -->
-            <button id="btn-switch-camera" class="hidden px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors" title="Switch Camera Lens">
-              🔄 Lens
-            </button>
-
             <!-- Torch button (hidden if not supported) -->
             <button id="btn-toggle-torch" class="hidden px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors" title="Toggle Flashlight">
               🔦 Torch
@@ -132,8 +127,7 @@
 
         <!-- Scanner Tips & Guidance -->
         <div class="px-3 py-1.5 bg-slate-950/80 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
-          <span>💡 Hold barcode 5–8 in. away in good light. Tap screen to focus.</span>
-          <span id="camera-lens-indicator" class="text-sky-400 font-mono text-[10px]"></span>
+          <span>💡 Fill the blue frame with the barcode and hold steady.</span>
         </div>
 
       </div>
