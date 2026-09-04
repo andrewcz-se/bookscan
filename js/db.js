@@ -23,15 +23,76 @@ export function normalizeIsbn(isbn) {
 }
 
 /**
+ * Converts an ISBN-13 starting with 978 to its corresponding ISBN-10
+ * @param {string} isbn13 
+ * @returns {string|null}
+ */
+export function isbn13To10(isbn13) {
+  const clean = normalizeIsbn(isbn13);
+  if (!clean || clean.length !== 13 || !clean.startsWith('978')) {
+    return null;
+  }
+  const core = clean.substring(3, 12);
+  let sum = 0;
+  for (let i = 0; i < 9; i++) {
+    sum += parseInt(core[i], 10) * (10 - i);
+  }
+  const rem = (11 - (sum % 11)) % 11;
+  const check = rem === 10 ? 'X' : rem.toString();
+  return core + check;
+}
+
+/**
+ * Converts an ISBN-10 to its corresponding ISBN-13
+ * @param {string} isbn10 
+ * @returns {string|null}
+ */
+export function isbn10To13(isbn10) {
+  const clean = normalizeIsbn(isbn10);
+  if (!clean || clean.length !== 10) {
+    return null;
+  }
+  const core = '978' + clean.substring(0, 9);
+  let sum = 0;
+  for (let i = 0; i < 12; i++) {
+    sum += parseInt(core[i], 10) * (i % 2 === 0 ? 1 : 3);
+  }
+  const rem = (10 - (sum % 10)) % 10;
+  return core + rem.toString();
+}
+
+/**
+ * Returns all possible ISBN representations (ISBN-13 and ISBN-10) for a given ISBN
+ * @param {string} rawIsbn 
+ * @returns {string[]}
+ */
+export function getIsbnVariants(rawIsbn) {
+  const clean = normalizeIsbn(rawIsbn);
+  if (!clean) return [];
+  const list = [clean];
+  if (clean.length === 13) {
+    const v10 = isbn13To10(clean);
+    if (v10 && !list.includes(v10)) list.push(v10);
+  } else if (clean.length === 10) {
+    const v13 = isbn10To13(clean);
+    if (v13 && !list.includes(v13)) list.push(v13);
+  }
+  return list;
+}
+
+/**
  * Adds a new book or increments copy count if already indexed
+ * Checks both ISBN-10 and ISBN-13 representations for duplicate detection
  * @param {Object} bookData 
  * @returns {Promise<{isDuplicate: boolean, book: Object}>}
  */
 export async function addOrIncrementBook(bookData) {
   const cleanIsbn = normalizeIsbn(bookData.isbn);
+  const variants = getIsbnVariants(cleanIsbn);
   
-  if (cleanIsbn) {
-    const existing = await db.books.where('isbn').equals(cleanIsbn).first();
+  if (variants.length > 0) {
+    // Check if any variant already exists in database
+    const existing = await db.books.where('isbn').anyOf(variants).first();
     if (existing) {
       const updatedCopies = (existing.copiesCount || 1) + 1;
       const now = new Date().toISOString();
@@ -124,7 +185,8 @@ export async function getBook(id) {
 export async function getBookByIsbn(isbn) {
   const clean = normalizeIsbn(isbn);
   if (!clean) return undefined;
-  return await db.books.where('isbn').equals(clean).first();
+  const variants = getIsbnVariants(clean);
+  return await db.books.where('isbn').anyOf(variants).first();
 }
 
 /**

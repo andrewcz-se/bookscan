@@ -393,20 +393,27 @@ function initScanner() {
       const statusIndicator = document.getElementById('camera-status-indicator');
       const startBtn = document.getElementById('btn-start-camera');
       const stopBtn = document.getElementById('btn-stop-camera');
-      const torchBtn = document.getElementById('btn-toggle-torch');
+      const switchBtn = document.getElementById('btn-switch-camera');
+      const lensIndicator = document.getElementById('camera-lens-indicator');
 
       if (status === 'active') {
         if (statusIndicator) statusIndicator.textContent = 'Camera active • Continuous scan';
         if (startBtn) startBtn.classList.add('hidden');
         if (stopBtn) stopBtn.classList.remove('hidden');
         if (torchBtn && scanner.hasFlashlight) torchBtn.classList.remove('hidden');
+        if (switchBtn && scanner.availableCameras.length > 1) switchBtn.classList.remove('hidden');
+        if (lensIndicator && scanner.availableCameras.length > 1) {
+          lensIndicator.textContent = `Lens ${scanner.currentCameraIndex + 1}/${scanner.availableCameras.length}`;
+        }
       } else if (status === 'starting') {
-        if (statusIndicator) statusIndicator.textContent = 'Requesting camera access...';
+        if (statusIndicator) statusIndicator.textContent = 'Starting camera & focus...';
       } else {
         if (statusIndicator) statusIndicator.textContent = 'Camera idle';
         if (startBtn) startBtn.classList.remove('hidden');
         if (stopBtn) stopBtn.classList.add('hidden');
         if (torchBtn) torchBtn.classList.add('hidden');
+        if (switchBtn) switchBtn.classList.add('hidden');
+        if (lensIndicator) lensIndicator.textContent = '';
       }
 
       if (err) {
@@ -424,6 +431,7 @@ function setupEventListeners() {
   const startBtn = document.getElementById('btn-start-camera');
   const stopBtn = document.getElementById('btn-stop-camera');
   const torchBtn = document.getElementById('btn-toggle-torch');
+  const switchBtn = document.getElementById('btn-switch-camera');
   const toggleCollapseBtn = document.getElementById('btn-toggle-scanner-view');
   const scannerSection = document.getElementById('scanner-section');
 
@@ -436,6 +444,13 @@ function setupEventListeners() {
   if (stopBtn) {
     stopBtn.addEventListener('click', () => {
       scanner.stop();
+    });
+  }
+
+  if (switchBtn) {
+    switchBtn.addEventListener('click', async () => {
+      showToast('Switching camera lens...', 'info', 1500);
+      await scanner.switchCamera();
     });
   }
 
