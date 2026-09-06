@@ -1,504 +1,98 @@
-<!DOCTYPE html>
-<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<!doctype html>
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#182c30">
+  <meta name="description" content="Scan ISBN barcodes, organize your books, and take your personal catalog with you. Saved on your device.">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="description" content="Instant book barcode scanner and personal library manager. Client-side, privacy-first, zero build tools.">
-  <title>BookScan — Mobile ISBN Scanner & Catalog</title>
-
-  <!-- Tailwind CSS CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: '#f0f9ff',
-              400: '#38bdf8',
-              500: '#0ea5e9',
-              600: '#0284c7',
-            }
-          }
-        }
-      }
-    }
-  </script>
-
-  <!-- Dexie.js CDN -->
-  <script src="https://unpkg.com/dexie/dist/dexie.js"></script>
-
-  <!-- Html5Qrcode CDN -->
-  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-
-  <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="css/styles.css">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Bookscan — Your personal library</title>
+  <link rel="icon" href="./assets/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="./assets/icon-192.png">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <!-- Pinned runtime libraries; no install, bundler, or build step is required. -->
+  <script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script defer src="https://unpkg.com/dexie@4.0.11/dist/dexie.js"></script>
+  <script defer src="https://cdn.tailwindcss.com" onload="tailwind.config = { corePlugins: { preflight: false } }"></script>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./js/app.js"></script>
 </head>
-<body class="min-h-full flex flex-col font-sans antialiased selection:bg-sky-500 selection:text-white pb-12">
-
-  <!-- TOP APP HEADER -->
-  <header class="sticky top-0 z-30 bg-slate-900/90 backdrop-blur-md border-b border-slate-800 px-4 py-3 sm:px-6">
-    <div class="max-w-4xl mx-auto flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-500/20 text-white font-bold text-lg">
-          📚
-        </div>
-        <div>
-          <h1 class="text-lg font-extrabold tracking-tight text-white leading-none">BookScan</h1>
-          <span id="catalog-counter-badge" class="text-xs text-sky-400 font-semibold tracking-wide">0 books cataloged</span>
-        </div>
-      </div>
-
-      <!-- Header actions -->
-      <div class="flex items-center gap-2">
-        <button id="btn-toggle-scanner-view" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-          <span>Hide Camera</span>
-        </button>
-
-        <button id="btn-open-backup-modal" class="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition-colors" title="Backup & Data">
-          <svg class="w-5 h-5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-        </button>
+<body>
+  <a href="#catalog" class="skip-link">Skip to catalog</a>
+  <header class="topbar">
+    <div class="header-inner">
+      <a class="brand" href="./" aria-label="Bookscan home"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 4h6a4 4 0 0 1 3 1.5A4 4 0 0 1 15 4h6v15h-6a4 4 0 0 0-3 1.5A4 4 0 0 0 9 19H3zM12 5.5v15"/></svg><span>bookscan<span class="brand-dot">.</span></span></a>
+      <span id="total-count" class="count-badge">0 books</span>
+      <div class="header-actions">
+        <button id="camera-toggle" class="button button-quiet" type="button" disabled>Start camera</button>
+        <button id="export" class="button button-primary" type="button" disabled><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"/></svg><span>Export CSV</span></button>
       </div>
     </div>
   </header>
-
-  <!-- MAIN CONTAINER -->
-  <main class="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 pt-4 flex flex-col gap-6">
-
-    <!-- 1. TOP SECTION: CAMERA SCANNER & MANUAL ISBN ENTRY -->
-    <section id="scanner-section" class="flex flex-col gap-3 transition-all duration-300">
-      
-      <!-- Scanner Card -->
-      <div class="relative bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl">
-        
-        <!-- Viewport Box -->
-        <div class="relative w-full aspect-[4/3] sm:aspect-[16/9] bg-slate-950 flex items-center justify-center overflow-hidden">
-          
-          <!-- Html5Qrcode mount element -->
-          <div id="reader" class="w-full h-full flex items-center justify-center"></div>
-
-          <!-- Targeting Reticle Overlay (Decorative guide) -->
-          <div class="scanner-reticle-box">
-            <div class="reticle-corner corner-tl"></div>
-            <div class="reticle-corner corner-tr"></div>
-            <div class="reticle-corner corner-bl"></div>
-            <div class="reticle-corner corner-br"></div>
-            <div class="scanner-laser"></div>
-          </div>
-
-          <!-- Continuous Scan Success Feedback Overlay (Shown for 2s on decode) -->
-          <div id="scan-success-overlay" class="hidden absolute inset-0 bg-emerald-950/70 backdrop-blur-sm z-20 flex-col items-center justify-center gap-3">
-            <div class="w-16 h-16 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-2xl scan-success-pulse">
-              <svg class="w-10 h-10 stroke-[3]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
-            </div>
-            <span class="text-emerald-200 font-bold text-base tracking-wide animate-pulse">Barcode Detected!</span>
-          </div>
-
-        </div>
-
-        <!-- Scanner Controls Bar -->
-        <div class="p-3 bg-slate-900/95 border-t border-slate-800/80 flex items-center justify-between gap-3">
-          <div class="flex items-center gap-2">
-            <span class="inline-block w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span id="camera-status-indicator" class="text-xs font-medium text-slate-400">Camera idle</span>
-          </div>
-
-          <div class="flex items-center gap-2">
-            <!-- Torch button (hidden if not supported) -->
-            <button id="btn-toggle-torch" class="hidden px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold border border-slate-700 transition-colors" title="Toggle Flashlight">
-              🔦 Torch
-            </button>
-
-            <!-- Start Camera Button -->
-            <button id="btn-start-camera" class="px-4 py-1.5 rounded-xl bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white text-xs font-bold shadow-md shadow-sky-500/20 flex items-center gap-1.5 transition-all">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-              Start Camera
-            </button>
-
-            <!-- Stop Camera Button -->
-            <button id="btn-stop-camera" class="hidden px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 border border-slate-700 text-xs font-bold transition-all">
-              Stop
-            </button>
-          </div>
-        </div>
-
-        <!-- Scanner Tips & Guidance -->
-        <div class="px-3 py-1.5 bg-slate-950/80 border-t border-slate-800/60 flex items-center justify-between text-[11px] text-slate-400">
-          <span>💡 Fill the blue frame with the barcode and hold steady.</span>
-        </div>
-
+  <main class="page">
+    <div id="system-notice" class="notice" role="status" hidden></div>
+    <div class="page-title"><div><p class="eyebrow">A home for every book</p><h1>Your personal library</h1></div><span id="connection" class="device-label"><span class="status-dot"></span>Saved on this device</span></div>
+    <section class="capture-panel" aria-labelledby="scan-heading">
+      <div class="capture-copy">
+        <span class="section-number">01 / ADD TO YOUR SHELVES</span>
+        <h2 id="scan-heading">Scan. Save. Shelve.</h2>
+        <p>Point your camera at a book’s ISBN barcode. We’ll find the details and add it to your library.</p>
+        <div class="scan-tips"><span class="tip-mark">↔</span><span>Keep the whole barcode inside the frame. Move the book back a little if it looks blurry.</span></div>
+        <details id="manual-details" class="manual-entry">
+          <summary>Enter an ISBN manually <span aria-hidden="true">＋</span></summary>
+          <form id="isbn-form">
+            <label for="isbn-input">10 or 13 digit ISBN</label>
+            <div class="input-action"><input id="isbn-input" name="isbn" type="text" inputmode="numeric" autocomplete="off" maxlength="32" placeholder="e.g. 9780141439518" required aria-describedby="isbn-help"><button id="lookup-button" class="button button-primary" type="submit" disabled>Add book</button></div>
+            <p id="isbn-help" class="field-help">Hyphens are fine. An ISBN-10 may end in X.</p>
+          </form>
+        </details>
+        <p id="lookup-status" class="field-help" role="status" hidden></p>
       </div>
-
-      <!-- Manual ISBN Text Input Field -->
-      <form id="manual-isbn-form" class="flex gap-2">
-        <div class="relative flex-1">
-          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"/></svg>
+      <div class="camera-column">
+        <div class="camera-stage">
+          <div id="reader" aria-label="Live barcode camera"></div>
+          <div id="camera-idle" class="camera-idle">
+            <svg class="barcode-icon" viewBox="0 0 80 56" aria-hidden="true"><path d="M2 15V2h15m46 0h15v13M2 41v13h15m46 0h15V41"/><path d="M16 16v24m5-24v24m8-24v24m5-24v24m9-24v24m6-24v24m5-24v24m9-24v24"/></svg>
+            <button id="camera-start" type="button" class="button button-light" disabled>Start scanning <span aria-hidden="true">↗</span></button>
+            <p id="camera-hint">Camera access is only used to scan barcodes.</p>
           </div>
-          <input 
-            type="text" 
-            id="manual-isbn-input"
-            inputmode="numeric"
-            placeholder="Type damaged or manual ISBN (e.g. 9780141439518)..." 
-            class="w-full pl-9 pr-3 py-2.5 bg-slate-900 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent font-mono transition-all"
-          >
         </div>
-        <button 
-          type="submit" 
-          class="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-sky-400 hover:text-sky-300 font-bold text-xs rounded-xl border border-slate-700 flex items-center gap-1.5 transition-colors flex-shrink-0"
-        >
-          <span>Lookup</span>
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
-        </button>
-      </form>
-
+        <div class="camera-footer"><span id="camera-status" role="status"><span class="status-dot"></span>Camera is off</span><button id="torch" class="text-button" type="button" aria-pressed="false" hidden>Light off</button><span class="isbn-label">ISBN SCANNER</span></div>
+        <label id="camera-choice-label" class="camera-choice" hidden>Camera <select id="camera-choice" aria-label="Choose camera"></select></label>
+      </div>
     </section>
-
-    <!-- 2. MIDDLE SECTION: QUICK-ACTION BAR & FILTERS -->
-    <section class="flex flex-col gap-3">
-
-      <!-- Search & Sort Row -->
-      <div class="flex flex-col sm:flex-row gap-2">
-        <!-- Search bar -->
-        <div class="relative flex-1">
-          <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-          </div>
-          <input 
-            type="search" 
-            id="catalog-search-input"
-            placeholder="Search by title, author, shelf location, or ISBN..." 
-            class="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-sky-500"
-          >
-        </div>
-
-        <!-- Sort dropdown -->
-        <div class="flex items-center gap-2">
-          <select id="catalog-sort-select" class="w-full sm:w-auto px-3 py-2 bg-slate-900 border border-slate-800 rounded-xl text-xs font-medium text-slate-300 focus:outline-none focus:ring-2 focus:ring-sky-500">
-            <option value="created_desc">Recently Scanned</option>
-            <option value="created_asc">Oldest First</option>
-            <option value="title_asc">Title (A - Z)</option>
-            <option value="author_asc">Author (A - Z)</option>
-            <option value="rating_desc">Highest Rating</option>
-          </select>
-
-          <!-- Quick Export CSV -->
-          <button id="btn-quick-export-csv" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors flex-shrink-0" title="Export Spreadsheet (CSV)">
-            <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-            <span class="hidden sm:inline">Export CSV</span>
-          </button>
-
-          <!-- Manual Form Trigger -->
-          <button id="btn-open-manual-entry" class="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 border border-slate-700 flex items-center gap-1.5 transition-colors flex-shrink-0" title="Add book manually without barcode">
-            <svg class="w-4 h-4 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"/></svg>
-            <span class="hidden sm:inline">Manual Book</span>
-          </button>
-        </div>
+    <section id="catalog" class="catalog-section" aria-labelledby="catalog-heading">
+      <div class="catalog-heading"><div><p class="eyebrow">Collected, one book at a time</p><h2 id="catalog-heading">On your shelves <span id="catalog-count">0</span></h2></div><span class="sort-label">Most recently added first</span></div>
+      <div class="catalog-controls">
+        <div class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="search" type="search" aria-label="Search by title, author, or location" placeholder="Search title, author, or shelf…" autocomplete="off"></div>
+        <label class="filter-label"><span class="sr-only">Filter by reading status</span><select id="status-filter"><option value="">All reading statuses</option><option>To Read</option><option>Reading</option><option>Finished</option></select></label>
       </div>
-
-      <!-- Status Filter Tabs -->
-      <div class="flex items-center gap-1 overflow-x-auto pb-1 border-b border-slate-800/80 scrollbar-none text-xs">
-        <button data-status="all" class="filter-tab-btn px-3 py-1.5 rounded-lg font-bold bg-sky-500 text-white shadow-sm transition-all flex items-center gap-1.5">
-          <span>All</span>
-          <span id="count-all" class="px-1.5 py-0.2 rounded-full bg-slate-900/40 text-[10px]">0</span>
-        </button>
-        <button data-status="unread" class="filter-tab-btn px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-slate-200 transition-all flex items-center gap-1.5">
-          <span>Unread</span>
-          <span id="count-unread" class="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px]">0</span>
-        </button>
-        <button data-status="reading" class="filter-tab-btn px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-slate-200 transition-all flex items-center gap-1.5">
-          <span>Reading</span>
-          <span id="count-reading" class="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px]">0</span>
-        </button>
-        <button data-status="finished" class="filter-tab-btn px-3 py-1.5 rounded-lg font-semibold text-slate-400 hover:text-slate-200 transition-all flex items-center gap-1.5">
-          <span>Finished</span>
-          <span id="count-finished" class="px-1.5 py-0.2 rounded-full bg-slate-800 text-[10px]">0</span>
-        </button>
-      </div>
-
+      <p id="result-count" class="result-count" aria-live="polite"></p>
+      <div id="book-grid" class="book-grid"></div>
+      <div id="empty-state" class="empty-state"><span class="empty-symbol" aria-hidden="true">＋</span><h3>Your next chapter starts here.</h3><p>Scan your first book or enter its ISBN above.<br>A little order for the stories you love.</p><button id="empty-add" class="text-button" type="button">Add your first book <span aria-hidden="true">↑</span></button></div>
     </section>
-
-    <!-- 3. BOTTOM SECTION: CATALOG VIEW -->
-    <section class="flex flex-col gap-3">
-      
-      <!-- Book Cards Grid / List -->
-      <div id="catalog-list" class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <!-- Rendered dynamically by app.js -->
-      </div>
-
-      <!-- Empty State -->
-      <div id="catalog-empty-state" class="p-12 text-center bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl flex flex-col items-center justify-center gap-3">
-        <div class="w-14 h-14 rounded-2xl bg-slate-800/80 flex items-center justify-center text-3xl">
-          📖
-        </div>
-        <div class="max-w-xs">
-          <h4 class="text-base font-bold text-slate-200">No books found</h4>
-          <p class="text-xs text-slate-400 mt-1">Start your camera above to scan book barcodes continuously, or type an ISBN manually.</p>
-        </div>
-      </div>
-
-    </section>
-
+    <footer class="page-footer"><span>YOUR BOOKS. YOUR LITTLE CORNER OF THE WORLD.</span><p>Stored in this browser, on this device. Export regularly to keep a copy.</p></footer>
   </main>
-
-  <!-- MODAL: EDIT BOOK METADATA -->
-  <div id="edit-modal" class="hidden fixed inset-0 z-50 modal-backdrop p-4 overflow-y-auto items-center justify-center">
-    <div class="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-left my-8">
-      
-      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
-        <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
-          <span>✏️ Edit Book Details</span>
-        </h3>
-        <button id="btn-close-edit-modal" type="button" class="text-slate-400 hover:text-slate-200 text-xl font-bold p-1">
-          ✕
-        </button>
-      </div>
-
-      <form id="edit-book-form" class="mt-4 flex flex-col gap-4">
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Book Title</label>
-          <input type="text" id="edit-title" required class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Author(s)</label>
-            <input type="text" id="edit-author" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">ISBN</label>
-            <input type="text" id="edit-isbn" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Publisher</label>
-            <input type="text" id="edit-publisher" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Year / Date</label>
-            <input type="text" id="edit-year" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Pages</label>
-            <input type="number" id="edit-pages" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Read Status</label>
-            <select id="edit-status" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-              <option value="Unread">Unread</option>
-              <option value="Reading">Reading</option>
-              <option value="Finished">Finished</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Shelf / Room Location</label>
-            <input type="text" id="edit-location" placeholder="e.g. Living Room Shelf B" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Copies Owned</label>
-            <input type="number" id="edit-copies" min="1" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <!-- Rating Picker -->
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Personal Rating</label>
-          <div id="edit-rating-picker" class="flex items-center gap-1 cursor-pointer">
-            <input type="hidden" id="edit-rating-value" value="0">
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Cover Image URL</label>
-          <input type="url" id="edit-cover" placeholder="https://..." class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Personal Notes</label>
-          <textarea id="edit-notes" rows="2" placeholder="Thoughts, quotes, or borrower notes..." class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
-        </div>
-
-        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
-          <button type="button" onclick="document.getElementById('btn-close-edit-modal').click()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors">
-            Cancel
-          </button>
-          <button type="submit" class="px-5 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs shadow-lg shadow-sky-500/20 transition-all">
-            Save Changes
-          </button>
-        </div>
+  <div id="modal" class="modal-backdrop" hidden>
+    <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-description" tabindex="-1">
+      <div class="modal-heading"><div><p class="eyebrow" id="modal-eyebrow">BOOK DETAILS</p><h2 id="modal-title">Edit book</h2></div><button id="modal-close" class="icon-button" type="button" aria-label="Close book details">×</button></div>
+      <p id="modal-description" class="modal-description"></p>
+      <form id="book-form">
+        <label for="book-isbn">ISBN</label><input id="book-isbn" readonly>
+        <label for="book-title">Title <span class="required">*</span></label><input id="book-title" required maxlength="500">
+        <label for="book-authors">Author</label><input id="book-authors" maxlength="500" placeholder="Author name">
+        <div class="form-grid"><div><label for="book-date">Publication date</label><input id="book-date" maxlength="80" placeholder="Year or date"></div><div><label for="book-pages">Pages</label><input id="book-pages" type="number" inputmode="numeric" min="1" max="100000" step="1"></div></div>
+        <label for="book-publisher">Publisher</label><input id="book-publisher" maxlength="300">
+        <div class="form-grid"><div><label for="book-status">Reading status</label><select id="book-status"><option>To Read</option><option>Reading</option><option>Finished</option></select></div><div><label for="book-location">Shelf / room</label><input id="book-location" maxlength="200" placeholder="e.g. Study shelf 3"></div></div>
+        <fieldset class="rating-field"><legend>Personal rating</legend><div class="stars" id="rating-stars"><label><input type="radio" name="rating" value="1" aria-label="1 star"><span aria-hidden="true">★</span></label><label><input type="radio" name="rating" value="2" aria-label="2 stars"><span aria-hidden="true">★</span></label><label><input type="radio" name="rating" value="3" aria-label="3 stars"><span aria-hidden="true">★</span></label><label><input type="radio" name="rating" value="4" aria-label="4 stars"><span aria-hidden="true">★</span></label><label><input type="radio" name="rating" value="5" aria-label="5 stars"><span aria-hidden="true">★</span></label><button id="clear-rating" class="text-button" type="button">Clear</button></div></fieldset>
+        <label for="book-notes">Personal notes</label><textarea id="book-notes" rows="3" maxlength="10000" placeholder="A favorite line, a recommendation, a thought…"></textarea>
+        <p id="form-error" class="form-error" role="alert"></p>
+        <div class="modal-actions"><button id="modal-cancel" class="button button-quiet" type="button">Cancel</button><button id="save-book" class="button button-primary" type="submit">Save book</button></div>
       </form>
-
-    </div>
+    </section>
   </div>
-
-  <!-- MODAL: MANUAL BOOK ENTRY -->
-  <div id="manual-modal" class="hidden fixed inset-0 z-50 modal-backdrop p-4 overflow-y-auto items-center justify-center">
-    <div class="relative w-full max-w-lg bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-left my-8">
-      
-      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
-        <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
-          <span>➕ Add Book Manually</span>
-        </h3>
-        <button id="btn-close-manual-modal" type="button" class="text-slate-400 hover:text-slate-200 text-xl font-bold p-1">
-          ✕
-        </button>
-      </div>
-
-      <form id="manual-entry-form" class="mt-4 flex flex-col gap-4">
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Book Title *</label>
-          <input type="text" id="manual-title" required placeholder="Enter book title" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Author(s)</label>
-            <input type="text" id="manual-author" placeholder="Author name" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">ISBN</label>
-            <input type="text" id="manual-isbn" placeholder="ISBN (optional)" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 font-mono focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Publisher</label>
-            <input type="text" id="manual-publisher" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Publication Year</label>
-            <input type="text" id="manual-year" placeholder="e.g. 2024" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Status</label>
-            <select id="manual-status" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-              <option value="Unread">Unread</option>
-              <option value="Reading">Reading</option>
-              <option value="Finished">Finished</option>
-            </select>
-          </div>
-
-          <div>
-            <label class="block text-xs font-semibold text-slate-400 mb-1">Shelf Location</label>
-            <input type="text" id="manual-location" placeholder="e.g. Living Room Shelf B" class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500">
-          </div>
-        </div>
-
-        <!-- Rating Picker -->
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Personal Rating</label>
-          <div id="manual-rating-picker" class="flex items-center gap-1 cursor-pointer">
-            <input type="hidden" id="manual-rating-value" value="0">
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-            <button type="button" class="star-btn p-1"><svg class="w-6 h-6 text-slate-600 fill-current" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg></button>
-          </div>
-        </div>
-
-        <div>
-          <label class="block text-xs font-semibold text-slate-400 mb-1">Notes</label>
-          <textarea id="manual-notes" rows="2" placeholder="Optional notes..." class="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-xl text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-sky-500"></textarea>
-        </div>
-
-        <div class="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
-          <button type="button" onclick="document.getElementById('btn-close-manual-modal').click()" class="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-slate-800 transition-colors">
-            Cancel
-          </button>
-          <button type="submit" class="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all">
-            Add to Library
-          </button>
-        </div>
-      </form>
-
-    </div>
-  </div>
-
-  <!-- MODAL: BACKUP & EXPORT/IMPORT -->
-  <div id="backup-modal" class="hidden fixed inset-0 z-50 modal-backdrop p-4 overflow-y-auto items-center justify-center">
-    <div class="relative w-full max-w-md bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl p-6 text-left my-8">
-      
-      <div class="flex items-center justify-between pb-4 border-b border-slate-800">
-        <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
-          <span>📦 Library Backup & Export</span>
-        </h3>
-        <button id="btn-close-backup-modal" type="button" class="text-slate-400 hover:text-slate-200 text-xl font-bold p-1">
-          ✕
-        </button>
-      </div>
-
-      <div class="mt-4 flex flex-col gap-5">
-        
-        <!-- CSV Export -->
-        <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700/60">
-          <h4 class="text-sm font-bold text-slate-200 flex items-center gap-2">
-            <span>📊 Export to CSV</span>
-          </h4>
-          <p class="text-xs text-slate-400 mt-1">Export a clean spreadsheet containing ISBN, Title, Author, Year, Pages, Status, Location, and Rating. Opens directly in Excel or iOS Numbers.</p>
-          <button id="btn-modal-export-csv" onclick="document.getElementById('btn-quick-export-csv').click()" class="mt-3 w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md transition-all">
-            Download CSV / Save to Files
-          </button>
-        </div>
-
-        <!-- JSON Backup -->
-        <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700/60">
-          <h4 class="text-sm font-bold text-slate-200 flex items-center gap-2">
-            <span>💾 Export JSON Backup</span>
-          </h4>
-          <p class="text-xs text-slate-400 mt-1">Full database dump including cover URLs, notes, and timestamps to keep your collection secure.</p>
-          <button id="btn-export-json" class="mt-3 w-full py-2 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-xl shadow-md transition-all">
-            Download JSON Backup
-          </button>
-        </div>
-
-        <!-- JSON Restore -->
-        <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700/60">
-          <h4 class="text-sm font-bold text-slate-200 flex items-center gap-2">
-            <span>📥 Restore / Import Backup</span>
-          </h4>
-          <p class="text-xs text-slate-400 mt-1">Restore your personal library from a previously exported JSON backup file.</p>
-          
-          <input type="file" id="import-json-file" accept=".json,application/json" class="hidden">
-          
-          <div class="mt-3 flex items-center gap-2">
-            <input type="checkbox" id="import-replace-checkbox" class="rounded bg-slate-700 border-slate-600 text-sky-500 focus:ring-0">
-            <label for="import-replace-checkbox" class="text-xs text-rose-300 select-none">Overwrite existing catalog</label>
-          </div>
-
-          <button id="btn-trigger-import" class="mt-3 w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-md transition-all">
-            Select JSON File to Restore
-          </button>
-        </div>
-
-      </div>
-
-    </div>
-  </div>
-
-  <!-- TOAST NOTIFICATION CONTAINER -->
-  <div id="toast-container" class="fixed bottom-5 right-5 left-5 sm:left-auto sm:w-96 z-50 flex flex-col gap-2 pointer-events-none"></div>
-
-  <!-- Main ES Module script -->
-  <script type="module" src="js/app.js"></script>
+  <div id="toasts" class="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
+  <noscript><p class="notice">Bookscan needs JavaScript enabled to scan and store books.</p></noscript>
 </body>
 </html>

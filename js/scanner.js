@@ -1,343 +1,211 @@
-/**
- * BookScan camera scanner.
- *
- * Keep the camera policy deliberately small: ask the browser for its default
- * rear camera, scan only Bookland EAN-13 barcodes, and let the phone manage
- * lens selection. This is more reliable than guessing from device labels on
- * multi-camera phones.
- */
+import { normalizeIsbn } from './isbn.js';
 
-class BookScanner {
-  constructor({
-    elementId = 'reader',
-    onScanSuccess,
-    onScanError,
-    onStatusChange
-  } = {}) {
-    this.elementId = elementId;
-    this.onScanSuccess = onScanSuccess;
-    this.onScanError = onScanError;
-    this.onStatusChange = onStatusChange;
+/** The qrbox callback controls BOTH the drawn frame and actual decode region. */
+export function scanBox(width, height) {
+  return { width: Math.floor(width * .9), height: Math.floor(Math.min(height * .7, width * .48)) };
+}
 
-    this.html5QrCode = null;
-    this.isScanning = false;
-    this.isStarting = false;
-    this.isPaused = false;
-    this.audioContext = null;
-    this.hasFlashlight = false;
-    this.isFlashlightOn = false;
-    this.pauseTimeout = null;
+export function preferredCamera(cameras) {
+  // Only favor confidently named standard rear lenses. Unknown labels keep the
+  // browser's environment choice; never guess based on device enumeration order.
+  return cameras.find(c => /^(back|rear) camera$/i.test(c.label?.trim())) ||
+    cameras.find(c => /back|rear|environment/i.test(c.label) && /wide|main|standard/i.test(c.label) && !/ultra|tele|dual|triple/i.test(c.label));
+}
 
-    // Confirm a value on two nearby frames. This costs only a fraction of a
-    // second at 15 fps and rejects most single-frame misreads.
-    this.candidateCode = '';
-    this.candidateSeenAt = 0;
-    this.lastAcceptedCode = '';
-    this.lastAcceptedAt = 0;
+export class BookScanner {
+  constructor({ onScan, toast }) {
+    this.onScan = onScan;
+    this.toast = toast;
+    this.engine = null;
+    this.running = false;
+    this.busy = false;
+    this.suspended = false;
+    this.nextScanAt = 0;
+    this.torchOn = false;
+    this.reader = document.getElementById('reader');
+    this.buttons = ['camera-toggle', 'camera-start'].map(id => document.getElementById(id));
+    this.choice = document.getElementById('camera-choice');
+    this.torchButton = document.getElementById('torch');
+    this.buttons.forEach(button => button.addEventListener('click', () => this.toggle()));
+    this.choice.addEventListener('change', () => this.changeCamera());
+    this.torchButton.addEventListener('click', () => this.toggleTorch());
+    // Apply iOS inline attributes as soon as the library inserts a video, before
+    // start() resolves. Do not crop, transform, or mirror the rendered stream.
+    this.observer = new MutationObserver(() => this.setInline());
+    this.observer.observe(this.reader, { childList: true, subtree: true });
+    // html5-qrcode calculates its crop at start. Recreate that crop after a
+    // viewport-width change so rotation cannot leave the frame out of alignment.
+    this.viewportWidth = window.innerWidth;
+    window.addEventListener('resize', () => {
+      if (this.viewportWidth === window.innerWidth) return;
+      this.viewportWidth = window.innerWidth;
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(async () => {
+        if (this.running && !this.busy) {
+          const id = this.choice.value || undefined;
+          await this.stop();
+          await this.start(id);
+        }
+      }, 350);
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && this.running && !this.busy) this.stop();
+    });
+    window.addEventListener('pagehide', () => {
+      this.reader.querySelector('video')?.srcObject?.getTracks().forEach(track => track.stop());
+    });
   }
 
-  initAudio() {
-    if (!this.audioContext) {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (AudioCtx) this.audioContext = new AudioCtx();
-    }
-    if (this.audioContext?.state === 'suspended') {
-      this.audioContext.resume().catch(() => {});
-    }
+  setInline() {
+    this.reader.querySelectorAll('video').forEach(video => {
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
+      video.muted = true;
+    });
   }
 
-  playSuccessSound() {
-    try {
-      this.initAudio();
-      if (!this.audioContext) return;
-
-      const now = this.audioContext.currentTime;
-      const playTone = (frequency, startsAt, endsAt, volume) => {
-        const oscillator = this.audioContext.createOscillator();
-        const gain = this.audioContext.createGain();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(frequency, startsAt);
-        gain.gain.setValueAtTime(volume, startsAt);
-        gain.gain.exponentialRampToValueAtTime(0.001, endsAt);
-        oscillator.connect(gain);
-        gain.connect(this.audioContext.destination);
-        oscillator.start(startsAt);
-        oscillator.stop(endsAt);
-      };
-
-      playTone(587.33, now, now + 0.12, 0.15);
-      playTone(880, now + 0.08, now + 0.28, 0.2);
-    } catch (error) {
-      console.warn('Audio feedback error:', error);
-    }
+  update(message) {
+    this.buttons.forEach(button => { button.disabled = this.busy; });
+    this.buttons[0].textContent = this.busy ? 'Please wait…' : this.running ? 'Pause camera' : this.engine ? 'Resume camera' : 'Start camera';
+    document.getElementById('camera-idle').hidden = this.running;
+    document.getElementById('camera-status').textContent = message || (this.running ? '● Ready for the next book' : 'Camera is off');
+    this.choice.disabled = this.busy;
   }
 
-  triggerHaptics() {
-    try {
-      navigator.vibrate?.(80);
-    } catch (_) {
-      // Vibration is optional and is not supported by iOS Safari.
-    }
+  async toggle() {
+    if (this.busy) return;
+    if (this.running) await this.stop();
+    else await this.start(this.choice.value || undefined);
   }
 
-  createScanner() {
-    if (this.html5QrCode) return;
-
-    const options = {
-      verbose: false,
-      experimentalFeatures: {
-        useBarCodeDetectorIfSupported: true
-      }
-    };
-
-    // A printed book ISBN barcode is EAN-13. Restricting the decoder to that
-    // one format makes each frame faster and avoids QR/UPC false positives.
-    if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
-      options.formatsToSupport = [Html5QrcodeSupportedFormats.EAN_13];
-    }
-
-    this.html5QrCode = new Html5Qrcode(this.elementId, options);
-  }
-
-  getScanConfig(useVideoConstraints = true) {
-    const config = {
-      fps: 15,
-      disableFlip: true,
-      qrbox: (viewfinderWidth, viewfinderHeight) => {
-        const width = Math.min(Math.floor(viewfinderWidth * 0.92), 720);
-        const height = Math.min(
-          Math.max(Math.floor(width * 0.36), 110),
-          Math.floor(viewfinderHeight * 0.55)
-        );
-        return { width, height };
-      }
-    };
-
-    if (useVideoConstraints) {
-      // videoConstraints intentionally owns the complete camera request. In
-      // Html5Qrcode it overrides the first start() argument and aspectRatio.
-      config.videoConstraints = {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1920 },
-        height: { ideal: 1080 },
-        frameRate: { ideal: 30, max: 30 }
-      };
-    }
-
-    return config;
-  }
-
-  async start() {
-    if (this.isScanning || this.isStarting) return;
-    this.isStarting = true;
-    this.initAudio();
-    this.createScanner();
-    this.notifyStatus('starting');
-
-    const onSuccess = (decodedText, decodedResult) => {
-      this.handleScanSuccess(decodedText, decodedResult);
-    };
-
-    try {
-      try {
-        await this.html5QrCode.start(
-          { facingMode: 'environment' },
-          this.getScanConfig(true),
-          onSuccess,
-          () => {}
-        );
-      } catch (preferredError) {
-        console.warn('Preferred camera settings failed; retrying with browser defaults:', preferredError);
-        await this.html5QrCode.start(
-          { facingMode: 'environment' },
-          this.getScanConfig(false),
-          onSuccess,
-          () => {}
-        );
-      }
-
-      this.isScanning = true;
-      this.isPaused = false;
-      this.applyVideoFixes();
-      await this.applyContinuousFocus();
-      await this.checkFlashlightSupport();
-      this.notifyStatus('active');
-    } catch (error) {
-      console.error('Failed to start scanner:', error);
-      this.isScanning = false;
-      this.notifyStatus('error', error);
-      throw error;
-    } finally {
-      this.isStarting = false;
-    }
-  }
-
-  applyVideoFixes() {
-    const video = document.querySelector(`#${this.elementId} video`);
-    if (!video) return;
-
-    video.setAttribute('playsinline', '');
-    video.setAttribute('webkit-playsinline', '');
-    video.playsInline = true;
-    video.muted = true;
-    video.autoplay = true;
-  }
-
-  async applyContinuousFocus() {
-    try {
-      const track = this.getVideoTrack();
-      if (!track?.applyConstraints) return;
-
-      const capabilities = track.getCapabilities?.() || {};
-      const advanced = [];
-      if (capabilities.focusMode?.includes('continuous')) {
-        advanced.push({ focusMode: 'continuous' });
-      }
-      if (capabilities.exposureMode?.includes('continuous')) {
-        advanced.push({ exposureMode: 'continuous' });
-      }
-      if (advanced.length) await track.applyConstraints({ advanced });
-    } catch (error) {
-      console.info('Camera manages focus automatically on this device.', error);
-    }
-  }
-
-  async checkFlashlightSupport() {
-    try {
-      const capabilities = this.getVideoTrack()?.getCapabilities?.() || {};
-      this.hasFlashlight = capabilities.torch === true;
-    } catch (_) {
-      this.hasFlashlight = false;
-    }
-  }
-
-  async toggleFlashlight() {
-    if (!this.hasFlashlight || !this.isScanning) return false;
-
-    try {
-      const track = this.getVideoTrack();
-      if (!track) return false;
-      const nextState = !this.isFlashlightOn;
-      await track.applyConstraints({ advanced: [{ torch: nextState }] });
-      this.isFlashlightOn = nextState;
-      return nextState;
-    } catch (error) {
-      console.warn('Torch toggle failed:', error);
-      this.isFlashlightOn = false;
-      return false;
-    }
-  }
-
-  getVideoTrack() {
-    const video = document.querySelector(`#${this.elementId} video`);
-    return video?.srcObject?.getVideoTracks?.()[0] || null;
-  }
-
-  normalizeBooklandCode(decodedText) {
-    const code = String(decodedText || '').replace(/\D/g, '');
-    if (!/^(978|979)\d{10}$/.test(code)) return '';
-
-    let sum = 0;
-    for (let index = 0; index < 12; index += 1) {
-      sum += Number(code[index]) * (index % 2 === 0 ? 1 : 3);
-    }
-    const expectedCheckDigit = (10 - (sum % 10)) % 10;
-    return expectedCheckDigit === Number(code[12]) ? code : '';
-  }
-
-  handleScanSuccess(decodedText, decodedResult) {
-    if (this.isPaused || !this.isScanning) return;
-
-    const code = this.normalizeBooklandCode(decodedText);
-    if (!code) {
-      this.onScanError?.('The detected barcode is not a valid ISBN-13.');
+  async start(deviceId) {
+    if (this.busy || this.running) return;
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+      this.toast('Camera access needs HTTPS or localhost. You can still enter an ISBN.', 'error');
       return;
     }
-
-    const now = Date.now();
-    const isConfirmation = code === this.candidateCode && now - this.candidateSeenAt < 1200;
-    this.candidateCode = code;
-    this.candidateSeenAt = now;
-    if (!isConfirmation) return;
-
-    // Do not repeatedly add the same stationary book, but allow the next
-    // different book immediately.
-    if (code === this.lastAcceptedCode && now - this.lastAcceptedAt < 4000) return;
-    this.lastAcceptedCode = code;
-    this.lastAcceptedAt = now;
-    this.candidateCode = '';
-
-    this.isPaused = true;
-    try {
-      this.html5QrCode.pause(false);
-    } catch (_) {
-      // The state guard above still prevents duplicate callbacks.
+    if (!window.Html5Qrcode) {
+      this.toast('The scanner library could not load. Connect to the internet and reload, or enter an ISBN.', 'error');
+      return;
     }
-
-    this.playSuccessSound();
-    this.triggerHaptics();
-    this.showSuccessOverlay();
-
-    Promise.resolve(this.onScanSuccess?.(code, decodedResult)).catch((error) => {
-      console.error('Scan handler error:', error);
-    });
-
-    clearTimeout(this.pauseTimeout);
-    this.pauseTimeout = setTimeout(() => {
-      this.hideSuccessOverlay();
-      if (!this.isScanning) return;
-      try {
-        this.html5QrCode.resume();
-      } catch (_) {
-        // The camera may have been stopped while the timer was pending.
+    this.busy = true;
+    this.update('Opening camera…');
+    try {
+      if (!this.engine) this.engine = new window.Html5Qrcode('reader', {
+        formatsToSupport: [window.Html5QrcodeSupportedFormats.EAN_13],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
+      const launch = id => this.engine.start(id ? { deviceId: { exact: id } } : { facingMode: 'environment' }, {
+        fps: 10, qrbox: scanBox, disableFlip: true
+      }, text => this.detect(text), () => {});
+      await launch(deviceId);
+      this.running = true;
+      this.setInline();
+      document.getElementById('camera-idle').hidden = true;
+      let devices = [];
+      try { devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch { /* Current camera still works. */ }
+      const current = this.engine.getRunningTrackSettings().deviceId;
+      const preferred = !deviceId && preferredCamera(devices);
+      if (preferred && preferred.deviceId !== current) {
+        await this.engine.stop();
+        this.running = false;
+        try { await launch(preferred.deviceId); }
+        catch { await launch(current); }
+        this.running = true;
       }
-      this.isPaused = false;
-    }, 900);
-  }
-
-  showSuccessOverlay() {
-    const overlay = document.getElementById('scan-success-overlay');
-    overlay?.classList.remove('hidden');
-    overlay?.classList.add('flex');
-  }
-
-  hideSuccessOverlay() {
-    const overlay = document.getElementById('scan-success-overlay');
-    overlay?.classList.add('hidden');
-    overlay?.classList.remove('flex');
+      this.choice.replaceChildren(...devices.map((device, i) => {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Camera ${i + 1}`;
+        return option;
+      }));
+      this.choice.value = this.engine.getRunningTrackSettings().deviceId || '';
+      document.getElementById('camera-choice-label').hidden = devices.length < 2;
+      let capabilities = {};
+      try { capabilities = this.engine.getRunningTrackCapabilities(); } catch { /* Older Safari. */ }
+      // Focus constraints are best effort, with no fixed zoom or resolution that
+      // might reject older phones or select a long-focus telephoto lens.
+      if (capabilities.focusMode?.includes('continuous')) {
+        try { await this.engine.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch { /* Use native autofocus. */ }
+      }
+      this.torchButton.hidden = !capabilities.torch;
+      this.torchOn = false;
+      this.torchButton.textContent = 'Light off';
+      this.torchButton.setAttribute('aria-pressed', 'false');
+      if (this.suspended) this.engine.pause(false);
+    } catch (error) {
+      if (this.running) {
+        try { await this.engine.stop(); } catch { /* Track cleanup below. */ }
+      }
+      this.reader.querySelector('video')?.srcObject?.getTracks().forEach(track => track.stop());
+      this.running = false;
+      try { this.engine?.clear(); } catch { /* Already cleared. */ }
+      this.torchButton.hidden = true;
+      const name = error?.name || String(error);
+      const message = /NotAllowed|Permission|denied/i.test(name) ? 'Camera permission was denied. Allow it in browser settings, or enter an ISBN below.' : /NotFound|DevicesNotFound/i.test(name) ? 'No camera found. Enter an ISBN to add a book.' : 'Could not open this camera. Try another camera or close apps using it.';
+      document.getElementById('camera-hint').textContent = message;
+      this.toast(message, 'error');
+    } finally {
+      this.busy = false;
+      this.update(this.suspended && this.running ? 'Paused while book details are open' : undefined);
+      if (document.hidden && this.running) await this.stop();
+    }
   }
 
   async stop() {
-    clearTimeout(this.pauseTimeout);
-    this.hideSuccessOverlay();
-
-    if (this.html5QrCode && (this.isScanning || this.isStarting)) {
-      try {
-        if (this.isFlashlightOn) await this.toggleFlashlight();
-        await this.html5QrCode.stop();
-        this.html5QrCode.clear();
-      } catch (error) {
-        console.warn('Error while stopping scanner:', error);
-      }
+    if (this.busy || !this.running) return;
+    this.busy = true;
+    this.update('Pausing camera…');
+    try { await this.engine.stop(); }
+    catch {
+      this.reader.querySelector('video')?.srcObject?.getTracks().forEach(track => track.stop());
+      this.engine = null;
+    } finally {
+      this.running = false;
+      this.busy = false;
+      this.torchButton.hidden = true;
+      this.reader.replaceChildren();
+      this.update('Camera paused');
     }
-
-    this.isScanning = false;
-    this.isStarting = false;
-    this.isPaused = false;
-    this.isFlashlightOn = false;
-    this.hasFlashlight = false;
-    this.candidateCode = '';
-    this.notifyStatus('stopped');
   }
 
-  notifyStatus(status, data) {
-    try {
-      this.onStatusChange?.(status, data);
-    } catch (error) {
-      // UI code must never be able to disable an otherwise working scanner.
-      console.error('Scanner status handler error:', error);
+  async changeCamera() {
+    const id = this.choice.value;
+    if (this.running) { await this.stop(); await this.start(id); }
+  }
+
+  suspend(value) {
+    this.suspended = value;
+    if (this.running && !this.busy) {
+      try {
+        if (value) this.engine.pause(false);
+        else { this.nextScanAt = Date.now() + 2000; this.engine.resume(); }
+      } catch { /* State may have changed during camera switching. */ }
+      this.update(value ? 'Paused while book details are open' : undefined);
     }
+  }
+
+  detect(text) {
+    if (this.suspended || this.busy || Date.now() < this.nextScanAt) return;
+    let isbn;
+    try { isbn = normalizeIsbn(text); } catch { return; } // Ignore UPCs and invalid checksums.
+    // Set synchronously, before any DB or network await, so successive frames
+    // cannot enqueue duplicates. The stream stays live and resumes automatically.
+    this.nextScanAt = Date.now() + 2000;
+    try { navigator.vibrate?.(100); } catch { /* Optional hardware feature. */ }
+    this.onScan(isbn);
+  }
+
+  async toggleTorch() {
+    if (!this.running || this.busy) return;
+    this.torchButton.disabled = true;
+    try {
+      await this.engine.applyVideoConstraints({ advanced: [{ torch: !this.torchOn }] });
+      this.torchOn = !this.torchOn;
+      this.torchButton.textContent = this.torchOn ? 'Light on' : 'Light off';
+      this.torchButton.setAttribute('aria-pressed', String(this.torchOn));
+    } catch { this.toast('This camera could not change its light.'); }
+    finally { this.torchButton.disabled = false; }
   }
 }
-
-export default BookScanner;
