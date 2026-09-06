@@ -12,6 +12,34 @@ export function preferredCamera(cameras) {
     cameras.find(c => /back|rear|environment/i.test(c.label) && /wide|main|standard/i.test(c.label) && !/ultra|tele|dual|triple/i.test(c.label));
 }
 
+/** start() in html5-qrcode 2.3.8 resolves before its `playing` handler creates
+ * the decode canvas. Do not permit stop/switch/pause until that handler ran. */
+export function waitForScannerReady(engine, video, timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const check = () => {
+      if (engine.isScanning && video?.readyState >= 2 && video.videoWidth > 0 && video.clientWidth > 0) {
+        clearInterval(timer);
+        resolve();
+      } else if (Date.now() - startedAt >= timeoutMs) {
+        clearInterval(timer);
+        reject(new Error('Camera permission was granted, but the video did not become ready. Tap Start scanning to retry.'));
+      }
+    };
+    const timer = setInterval(check, 50);
+    check();
+  });
+}
+
+export function cameraErrorMessage(error) {
+  const detail = typeof error === 'string' ? error : [error?.name, error?.message].filter(Boolean).join(': ');
+  const explanation = /NotAllowed|Permission.*denied/i.test(detail) ? 'Camera access was denied. Allow it in browser settings, or enter an ISBN.' :
+    /NotFound|DevicesNotFound/i.test(detail) ? 'No matching camera was found. Select another camera or enter an ISBN.' :
+    /NotReadable|TrackStart/i.test(detail) ? 'The camera is busy. Close other apps using it, then try again.' :
+    'The scanner could not start. Tap Start scanning to retry, or enter an ISBN.';
+  return detail ? `${explanation} Details: ${detail.slice(0, 350)}` : explanation;
+}
+
 export class BookScanner {
   constructor({ onScan, toast }) {
     this.onScan = onScan;
@@ -67,7 +95,7 @@ export class BookScanner {
   update(message) {
     this.buttons.forEach(button => { button.disabled = this.busy; });
     this.buttons[0].textContent = this.busy ? 'Please wait…' : this.running ? 'Pause camera' : this.engine ? 'Resume camera' : 'Start camera';
-    document.getElementById('camera-idle').hidden = this.running;
+    document.getElementById('camera-idle').hidden = this.running || this.busy;
     document.getElementById('camera-status').textContent = message || (this.running ? '● Ready for the next book' : 'Camera is off');
     this.choice.disabled = this.busy;
   }
@@ -91,42 +119,39 @@ export class BookScanner {
     this.busy = true;
     this.update('Opening camera…');
     try {
+      let devices = [];
+      try { devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch { /* Device labels are optional. */ }
+      // If permission already exposes device labels, choose the main lens before
+      // opening it. On first use let Safari select environment; never immediately
+      // stop a newly opened stream merely to change lenses.
+      const requestedId = deviceId || preferredCamera(devices)?.deviceId;
       if (!this.engine) this.engine = new window.Html5Qrcode('reader', {
         formatsToSupport: [window.Html5QrcodeSupportedFormats.EAN_13],
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        useBarCodeDetectorIfSupported: true,
         verbose: false
       });
-      const launch = id => this.engine.start(id ? { deviceId: { exact: id } } : { facingMode: 'environment' }, {
+      await this.engine.start(requestedId ? { deviceId: { exact: requestedId } } : { facingMode: 'environment' }, {
         fps: 10, qrbox: scanBox, disableFlip: true
       }, text => this.detect(text), () => {});
-      await launch(deviceId);
-      this.running = true;
       this.setInline();
-      document.getElementById('camera-idle').hidden = true;
-      let devices = [];
+      await waitForScannerReady(this.engine, this.reader.querySelector('video'));
+      this.running = true;
       try { devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput'); } catch { /* Current camera still works. */ }
-      const current = this.engine.getRunningTrackSettings().deviceId;
-      const preferred = !deviceId && preferredCamera(devices);
-      if (preferred && preferred.deviceId !== current) {
-        await this.engine.stop();
-        this.running = false;
-        try { await launch(preferred.deviceId); }
-        catch { await launch(current); }
-        this.running = true;
-      }
+      let currentId = requestedId || '';
+      try { currentId = this.engine.getRunningTrackSettings()?.deviceId || currentId; } catch { /* Settings are optional on older browsers. */ }
       this.choice.replaceChildren(...devices.map((device, i) => {
         const option = document.createElement('option');
         option.value = device.deviceId;
         option.textContent = device.label || `Camera ${i + 1}`;
         return option;
       }));
-      this.choice.value = this.engine.getRunningTrackSettings().deviceId || '';
+      this.choice.value = currentId;
       document.getElementById('camera-choice-label').hidden = devices.length < 2;
       let capabilities = {};
-      try { capabilities = this.engine.getRunningTrackCapabilities(); } catch { /* Older Safari. */ }
+      try { capabilities = this.engine.getRunningTrackCapabilities() || {}; } catch { /* Older Safari. */ }
       // Focus constraints are best effort, with no fixed zoom or resolution that
       // might reject older phones or select a long-focus telephoto lens.
-      if (capabilities.focusMode?.includes('continuous')) {
+      if (Array.isArray(capabilities.focusMode) && capabilities.focusMode.includes('continuous')) {
         try { await this.engine.applyVideoConstraints({ advanced: [{ focusMode: 'continuous' }] }); } catch { /* Use native autofocus. */ }
       }
       this.torchButton.hidden = !capabilities.torch;
@@ -135,15 +160,18 @@ export class BookScanner {
       this.torchButton.setAttribute('aria-pressed', 'false');
       if (this.suspended) this.engine.pause(false);
     } catch (error) {
-      if (this.running) {
-        try { await this.engine.stop(); } catch { /* Track cleanup below. */ }
-      }
-      this.reader.querySelector('video')?.srcObject?.getTracks().forEach(track => track.stop());
+      console.error('Bookscan camera startup failed:', error);
+      // The engine may own a stream even when startup never reached `running`.
+      // Keep references before stop() removes the video's tracks and DOM node.
+      const tracks = this.reader.querySelector('video')?.srcObject?.getTracks() || [];
+      try { await this.engine?.stop(); } catch { /* A failed render may have no canvas to remove. */ }
+      tracks.forEach(track => track.stop());
       this.running = false;
       try { this.engine?.clear(); } catch { /* Already cleared. */ }
+      this.engine = null; // Never reuse an engine with a failed state transition.
+      this.reader.replaceChildren();
       this.torchButton.hidden = true;
-      const name = error?.name || String(error);
-      const message = /NotAllowed|Permission|denied/i.test(name) ? 'Camera permission was denied. Allow it in browser settings, or enter an ISBN below.' : /NotFound|DevicesNotFound/i.test(name) ? 'No camera found. Enter an ISBN to add a book.' : 'Could not open this camera. Try another camera or close apps using it.';
+      const message = cameraErrorMessage(error);
       document.getElementById('camera-hint').textContent = message;
       this.toast(message, 'error');
     } finally {
