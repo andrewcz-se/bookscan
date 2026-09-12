@@ -1,102 +1,88 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Barcode Scanner Test</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
-<style>
-  body {
-    font-family: -apple-system, sans-serif;
-    max-width: 500px;
-    margin: 20px auto;
-    padding: 0 16px;
-    background: #111;
-    color: #eee;
-  }
-  h2 { text-align: center; }
-  #reader {
-    width: 100%;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  #output {
-    margin-top: 16px;
-    padding: 16px;
-    background: #222;
-    border-radius: 8px;
-    min-height: 60px;
-    font-size: 18px;
-    word-break: break-all;
-  }
-  #output .placeholder { color: #777; }
-  #log {
-    margin-top: 8px;
-    font-size: 12px;
-    color: #666;
-  }
-  button {
-    margin-top: 10px;
-    padding: 10px 16px;
-    font-size: 14px;
-    border: none;
-    border-radius: 6px;
-    background: #333;
-    color: #eee;
-  }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Barcode scanner test</title>
+  <!-- Match the main app's library version. This page needs no app files. -->
+  <script defer src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 20px; background: #f5f6f8; color: #18212c; font: 16px/1.5 system-ui, sans-serif; }
+    main { max-width: 560px; margin: 0 auto; }
+    h1 { font-size: 1.5rem; margin: 0 0 8px; }
+    p { margin: 8px 0 16px; }
+    #reader { width: 100%; background: white; }
+    /* Keep the library's video geometry intact; no crop or fixed height. */
+    button, select { font: inherit; min-height: 44px; max-width: 100%; margin: 4px; }
+    button { cursor: pointer; }
+    .result { margin-top: 20px; padding: 16px; background: white; border: 1px solid #bcc5d0; border-radius: 8px; }
+    h2 { font-size: 1rem; margin: 0 0 8px; }
+    output { display: block; min-height: 2.5em; overflow-wrap: anywhere; white-space: pre-wrap; font: 1.6rem/1.4 ui-monospace, monospace; user-select: text; -webkit-user-select: text; }
+    #scan-info { color: #4c5968; margin-bottom: 0; }
+    #error { color: #a01515; white-space: pre-wrap; overflow-wrap: anywhere; }
+    small { display: block; margin-top: 16px; color: #4c5968; }
+  </style>
 </head>
 <body>
-  <h2>Scanner Test</h2>
-  <div id="reader"></div>
-  <div id="output"><span class="placeholder">Waiting for scan…</span></div>
-  <button id="resumeBtn" style="display:none;">Scan Again</button>
-  <div id="log"></div>
+  <main>
+    <h1>Barcode scanner test</h1>
+    <p>Allow camera access, choose a rear camera, and start scanning. Keep the entire barcode visible and move it back until sharp.</p>
+    <div id="reader" aria-label="Barcode camera and controls"></div>
+    <p id="error" role="alert" hidden></p>
+    <section class="result" aria-labelledby="output-heading">
+      <h2 id="output-heading">Scanned barcode</h2>
+      <output id="barcode" aria-live="polite">No barcode scanned yet</output>
+      <p id="scan-info">Waiting for a scan.</p>
+    </section>
+    <small>html5-qrcode 2.3.8 · Full-frame scanning · Raw values, no ISBN filtering.<br>Open this page over HTTPS on your iPhone. Internet access is needed to load the scanner library.</small>
+    <noscript><p>Enable JavaScript to use the scanner.</p></noscript>
+  </main>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const errorOutput = document.getElementById('error');
+      const showError = error => {
+        errorOutput.hidden = false;
+        errorOutput.textContent = String(error?.message || error);
+      };
 
-<script>
-  const outputEl = document.getElementById('output');
-  const logEl = document.getElementById('log');
-  const resumeBtn = document.getElementById('resumeBtn');
-  let scanCount = 0;
-  let lastTime = performance.now();
+      if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+        showError('Camera access is unavailable. Open this page using HTTPS (a computer’s local-network HTTP address will not work on iPhone).');
+        return;
+      }
+      if (!window.Html5QrcodeScanner) {
+        showError('html5-qrcode could not load. Check your internet connection and reload this page.');
+        return;
+      }
 
-  const html5QrCode = new Html5Qrcode("reader");
+      try {
+        const formats = window.Html5QrcodeSupportedFormats;
+        const scanner = new window.Html5QrcodeScanner('reader', {
+          fps: 10,
+          // No qrbox: decode the entire video to isolate crop/alignment problems.
+          formatsToSupport: [
+            formats.EAN_13, formats.EAN_8, formats.UPC_A, formats.UPC_E,
+            formats.CODE_128, formats.CODE_39, formats.ITF, formats.CODABAR
+          ],
+          supportedScanTypes: [window.Html5QrcodeScanType.SCAN_TYPE_CAMERA],
+          rememberLastUsedCamera: false
+        }, false);
 
-  function onScanSuccess(decodedText, decodedResult) {
-    const now = performance.now();
-    const delta = (now - lastTime).toFixed(0);
-    lastTime = now;
-    scanCount++;
-
-    outputEl.innerHTML = decodedText;
-    logEl.textContent = `Scan #${scanCount} — decoded ${delta}ms after last | format: ${decodedResult.result.format?.formatName || 'unknown'}`;
-
-    // Pause briefly to avoid re-triggering on the same code immediately
-    html5QrCode.pause(true);
-    resumeBtn.style.display = 'inline-block';
-  }
-
-  resumeBtn.addEventListener('click', () => {
-    html5QrCode.resume();
-    resumeBtn.style.display = 'none';
-  });
-
-  const config = {
-    fps: 10,
-    qrbox: { width: 250, height: 250 },
-    aspectRatio: 1.0
-  };
-
-  html5QrCode.start(
-    { facingMode: "environment" },
-    config,
-    onScanSuccess,
-    (errorMessage) => {
-      // fires continuously while no code is found; ignore
-    }
-  ).catch((err) => {
-    outputEl.innerHTML = `<span style="color:#f66">Camera error: ${err}</span>`;
-  });
-</script>
+        scanner.render((decodedText, decodedResult) => {
+          const output = document.getElementById('barcode');
+          // Preserve leading zeros and display the decoded value as plain text.
+          if (output.textContent !== decodedText) output.textContent = decodedText;
+          const format = decodedResult?.result?.format?.formatName || 'Barcode';
+          document.getElementById('scan-info').textContent =
+            `${format} · Last detected ${new Date().toLocaleTimeString()}`;
+        }, () => {
+          // A frame without a barcode is normal. Camera errors appear in the
+          // library's controls; do not overwrite the last successful result.
+        });
+      } catch (error) {
+        showError(error);
+      }
+    });
+  </script>
 </body>
 </html>

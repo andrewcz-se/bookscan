@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Barcode Scanner Test</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  body {
+    font-family: -apple-system, sans-serif;
+    max-width: 500px;
+    margin: 20px auto;
+    padding: 0 16px;
+    background: #111;
+    color: #eee;
+  }
+  h2 { text-align: center; }
+  #reader {
+    width: 100%;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  #output {
+    margin-top: 16px;
+    padding: 16px;
+    background: #222;
+    border-radius: 8px;
+    min-height: 60px;
+    font-size: 18px;
+    word-break: break-all;
+  }
+  #output .placeholder { color: #777; }
+  #log {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #666;
+  }
+  button {
+    margin-top: 10px;
+    padding: 10px 16px;
+    font-size: 14px;
+    border: none;
+    border-radius: 6px;
+    background: #333;
+    color: #eee;
+  }
+</style>
+</head>
+<body>
+  <h2>Scanner Test</h2>
+  <div id="reader"></div>
+  <div id="output"><span class="placeholder">Waiting for scan…</span></div>
+  <button id="resumeBtn" style="display:none;">Scan Again</button>
+  <div id="log"></div>
+
+<script>
+  const outputEl = document.getElementById('output');
+  const logEl = document.getElementById('log');
+  const resumeBtn = document.getElementById('resumeBtn');
+  let scanCount = 0;
+  let lastTime = performance.now();
+
+  const html5QrCode = new Html5Qrcode("reader");
+
+  function onScanSuccess(decodedText, decodedResult) {
+    const now = performance.now();
+    const delta = (now - lastTime).toFixed(0);
+    lastTime = now;
+    scanCount++;
+
+    outputEl.innerHTML = decodedText;
+    logEl.textContent = `Scan #${scanCount} — decoded ${delta}ms after last | format: ${decodedResult.result.format?.formatName || 'unknown'}`;
+
+    // Pause briefly to avoid re-triggering on the same code immediately
+    html5QrCode.pause(true);
+    resumeBtn.style.display = 'inline-block';
+  }
+
+  resumeBtn.addEventListener('click', () => {
+    html5QrCode.resume();
+    resumeBtn.style.display = 'none';
+  });
+
+  const config = {
+    fps: 10,
+    qrbox: { width: 250, height: 250 },
+    aspectRatio: 1.0
+  };
+
+  html5QrCode.start(
+    { facingMode: "environment" },
+    config,
+    onScanSuccess,
+    (errorMessage) => {
+      // fires continuously while no code is found; ignore
+    }
+  ).catch((err) => {
+    outputEl.innerHTML = `<span style="color:#f66">Camera error: ${err}</span>`;
+  });
+</script>
+</body>
+</html>
