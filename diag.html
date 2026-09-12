@@ -1,0 +1,817 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>iPhone Barcode Scanner & Debug Tool</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- html5-qrcode library -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        appleDark: '#0B0F19',
+                        cardDark: '#161F30',
+                        accent: '#3B82F6',
+                        accentGlow: 'rgba(59, 130, 246, 0.4)',
+                        success: '#10B981',
+                        laser: '#EF4444'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Smooth momentum scrolling for iOS logs */
+        .smooth-scroll {
+            -webkit-overflow-scrolling: touch;
+        }
+
+        /* Scan laser line animation */
+        @keyframes scanSweep {
+            0% {
+                top: 5%;
+                opacity: 0.2;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                top: 95%;
+                opacity: 0.2;
+            }
+        }
+
+        .scanning-laser {
+            animation: scanSweep 2s ease-in-out infinite alternate;
+        }
+
+        /* html5-qrcode video canvas container overrides to fit iOS cleanly */
+        #reader {
+            width: 100% !important;
+            border: none !important;
+            background: #000000;
+        }
+
+        #reader video {
+            width: 100% !important;
+            height: auto !important;
+            object-fit: cover !important;
+            border-radius: 0.75rem;
+            transform: scaleX(1); /* Ensure back camera is not mirrored */
+        }
+
+        /* Prevent tap highlight flicker on iOS */
+        button, select {
+            -webkit-tap-highlight-color: transparent;
+        }
+    </style>
+</head>
+<body class="bg-appleDark text-slate-100 min-h-screen font-sans antialiased flex flex-col justify-between select-none">
+
+    <header class="sticky top-0 z-30 bg-appleDark/90 backdrop-blur-md border-b border-slate-800 px-4 py-3">
+        <div class="max-w-2xl mx-auto flex items-center justify-between">
+            <div class="flex items-center space-x-2.5">
+                <div class="w-8 h-8 rounded-lg bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="text-sm font-bold tracking-wide leading-tight">iOS Barcode Test Bench</h1>
+                    <p class="text-[11px] text-slate-400">html5-qrcode · iPhone Debugger</p>
+                </div>
+            </div>
+
+            <!-- Scanner Status Badge -->
+            <div class="flex items-center space-x-2">
+                <span id="statusIndicator" class="flex h-2.5 w-2.5 relative">
+                    <span id="statusPing" class="animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-400 opacity-75"></span>
+                    <span id="statusDot" class="relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-500"></span>
+                </span>
+                <span id="statusLabel" class="text-xs font-medium text-slate-400 tracking-wide">IDLE</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-2xl mx-auto w-full p-4 space-y-4 flex-grow">
+
+        <!-- Viewfinder Card -->
+        <section class="bg-cardDark rounded-2xl p-3 border border-slate-800/80 shadow-2xl relative overflow-hidden">
+            <!-- Viewfinder Header & Torch Toggle -->
+            <div class="flex items-center justify-between mb-2.5 px-1">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                    </svg>
+                    Live Viewfinder
+                </span>
+
+                <div class="flex items-center space-x-2">
+                    <!-- Torch Toggle (Only enabled if supported) -->
+                    <button id="torchBtn" disabled class="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-500 text-xs font-medium border border-slate-700/60 flex items-center gap-1.5 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        <span>Torch</span>
+                    </button>
+                    <!-- Audio feedback toggle -->
+                    <button id="beepBtn" class="px-2 py-1 rounded-lg bg-blue-900/30 text-blue-400 border border-blue-500/30 text-xs font-medium flex items-center gap-1">
+                        <svg id="beepIcon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path>
+                        </svg>
+                        <span>Beep</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Video Window Container -->
+            <div class="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden flex items-center justify-center border border-slate-800">
+                <!-- HTML5-QRCode Render Target -->
+                <div id="reader" class="w-full h-full"></div>
+
+                <!-- Idle / Off placeholder -->
+                <div id="scannerOffPlaceholder" class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-slate-900/90 backdrop-blur-sm z-10 transition-opacity duration-300">
+                    <div class="w-14 h-14 rounded-full bg-slate-800 flex items-center justify-center mb-3 text-slate-500 border border-slate-700">
+                        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                        </svg>
+                    </div>
+                    <p class="text-sm font-semibold text-slate-300">Camera is Offline</p>
+                    <p class="text-xs text-slate-500 mt-1 max-w-xs">Select your iPhone camera lens below and tap Start Scanner.</p>
+                </div>
+
+                <!-- Active HUD Reticle (Shown only when scanning) -->
+                <div id="scannerHud" class="absolute inset-0 pointer-events-none hidden z-20">
+                    <!-- Laser Scanner Line -->
+                    <div class="absolute left-8 right-8 h-[2px] bg-red-500 shadow-[0_0_8px_#ef4444] scanning-laser"></div>
+
+                    <!-- Visual Barcode Alignment Guide Box -->
+                    <div class="absolute inset-0 m-auto w-[82%] h-[46%] border border-white/25 rounded-lg flex items-center justify-center">
+                        <div class="absolute -top-1 -left-1 w-4 h-4 border-t-2 border-l-2 border-blue-400"></div>
+                        <div class="absolute -top-1 -right-1 w-4 h-4 border-t-2 border-r-2 border-blue-400"></div>
+                        <div class="absolute -bottom-1 -left-1 w-4 h-4 border-b-2 border-l-2 border-blue-400"></div>
+                        <div class="absolute -bottom-1 -right-1 w-4 h-4 border-b-2 border-r-2 border-blue-400"></div>
+                        <span class="text-[10px] uppercase font-mono tracking-widest text-white/50 bg-black/40 px-2 py-0.5 rounded">Align Barcode</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Camera Controls Card -->
+        <section class="bg-cardDark rounded-2xl p-4 border border-slate-800/80 shadow-lg space-y-3.5">
+            <!-- Lens Selector (Vital for iPhone Telephoto / Wide / Ultra-Wide testing) -->
+            <div>
+                <div class="flex items-center justify-between mb-1.5">
+                    <label for="cameraSelect" class="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h7"></path>
+                        </svg>
+                        iPhone Camera / Lens Selection
+                    </label>
+                    <button id="refreshCamsBtn" title="Re-query camera devices" class="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 active:scale-95 transition-transform">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                        </svg>
+                        Reload Lenses
+                    </button>
+                </div>
+                <div class="relative">
+                    <select id="cameraSelect" class="w-full bg-slate-900 border border-slate-700 text-slate-200 text-xs rounded-xl px-3.5 py-2.5 appearance-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 truncate pr-8">
+                        <option value="">Requesting camera permissions...</option>
+                    </select>
+                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                        </svg>
+                    </div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1.5 leading-relaxed">
+                    <span class="text-amber-400 font-semibold">Tip for iPhone:</span> Choose the primary <strong>"Back Camera" (1x Wide)</strong>. iPhone 0.5x Ultra-Wide lenses fail to autofocus on standard 1D barcodes at close range.
+                </p>
+            </div>
+
+            <!-- Start / Stop Action Buttons -->
+            <div class="grid grid-cols-2 gap-3 pt-1">
+                <button id="startBtn" class="w-full py-3 px-4 bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-sm font-semibold rounded-xl shadow-lg shadow-blue-900/30 flex items-center justify-center gap-2 transition-all">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd"></path>
+                    </svg>
+                    <span>Start Scanner</span>
+                </button>
+
+                <button id="stopBtn" disabled class="w-full py-3 px-4 bg-slate-800 text-slate-500 border border-slate-700 text-sm font-semibold rounded-xl flex items-center justify-center gap-2 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8 7a1 1 0 00-1 1v4a1 1 0 001 1h4a1 1 0 001-1V8a1 1 0 00-1-1H8z" clip-rule="evenodd"></path>
+                    </svg>
+                    <span>Stop Scanner</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Scanned Barcode Output Display -->
+        <section class="bg-cardDark rounded-2xl p-4 border border-slate-800/80 shadow-lg space-y-3">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    Scanned Result
+                </span>
+
+                <div class="flex items-center space-x-2">
+                    <span id="scanCountBadge" class="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">0 scans</span>
+                    <button id="clearResultBtn" class="text-[11px] text-slate-400 hover:text-slate-200">Clear</button>
+                </div>
+            </div>
+
+            <!-- Result Box -->
+            <div class="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5">
+                <div class="flex items-start justify-between gap-3">
+                    <div class="flex-grow min-w-0">
+                        <div class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">Barcode Value</div>
+                        <div id="barcodeValue" class="text-lg sm:text-xl font-mono font-bold text-white tracking-wide break-all mt-0.5 select-text">
+                            No barcode detected yet
+                        </div>
+                    </div>
+                    <!-- Copy Button -->
+                    <button id="copyBtn" class="shrink-0 p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-blue-600 text-slate-300 hover:text-white border border-slate-700 transition-all">
+                        <svg id="copyIcon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+
+                <!-- Meta Details: Format & Timestamp -->
+                <div class="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-800/80 text-xs">
+                    <div>
+                        <span class="text-slate-500 block text-[10px] uppercase">Format</span>
+                        <span id="barcodeFormat" class="font-mono text-slate-300 font-medium">—</span>
+                    </div>
+                    <div>
+                        <span class="text-slate-500 block text-[10px] uppercase">Timestamp</span>
+                        <span id="barcodeTime" class="font-mono text-slate-300 font-medium">—</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Diagnostic Telemetry & Console Log -->
+        <section class="bg-cardDark rounded-2xl p-4 border border-slate-800/80 shadow-lg space-y-3">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                    <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"></path>
+                    </svg>
+                    iOS Diagnostics & Logs
+                </span>
+
+                <div class="flex items-center space-x-2">
+                    <button id="copyLogsBtn" class="text-[11px] text-blue-400 hover:text-blue-300">Copy Logs</button>
+                    <span class="text-slate-600">|</span>
+                    <button id="clearLogsBtn" class="text-[11px] text-slate-400 hover:text-slate-200">Clear</button>
+                </div>
+            </div>
+
+            <!-- Active Camera Stream Telemetry Pills -->
+            <div class="grid grid-cols-3 gap-2 text-[11px] font-mono">
+                <div class="bg-slate-900 border border-slate-800/80 rounded-lg p-2">
+                    <span class="text-slate-500 block text-[9px] uppercase">Resolution</span>
+                    <span id="telemetryResolution" class="text-slate-300 font-semibold">—</span>
+                </div>
+                <div class="bg-slate-900 border border-slate-800/80 rounded-lg p-2">
+                    <span class="text-slate-500 block text-[9px] uppercase">FPS / Focus</span>
+                    <span id="telemetryFocus" class="text-slate-300 font-semibold">—</span>
+                </div>
+                <div class="bg-slate-900 border border-slate-800/80 rounded-lg p-2">
+                    <span class="text-slate-500 block text-[9px] uppercase">Torch Supp.</span>
+                    <span id="telemetryTorch" class="text-slate-300 font-semibold">—</span>
+                </div>
+            </div>
+
+            <!-- Log Terminal Window -->
+            <div id="logConsole" class="bg-black/90 border border-slate-800 rounded-xl p-3 font-mono text-[11px] text-slate-300 h-36 overflow-y-auto smooth-scroll space-y-1 select-text">
+                <!-- Log items rendered here -->
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="p-3 text-center text-[11px] text-slate-600">
+        Engineered for iPhone Safari & iOS WebViews · Uses HTML5-QRCode v2.3.8
+    </footer>
+
+    <!-- Toast Notification (Replacing alert()) -->
+    <div id="toastMessage" class="fixed bottom-5 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-4 py-2 rounded-xl text-xs font-medium shadow-2xl border border-slate-700 opacity-0 pointer-events-none transition-opacity duration-200 z-50 flex items-center gap-2">
+        <span id="toastText">Copied to clipboard</span>
+    </div>
+
+    <!-- Hidden clipboard textarea helper -->
+    <textarea id="hiddenCopyInput" class="fixed -top-96 left-0 opacity-0 pointer-events-none"></textarea>
+
+    <script>
+        /* Global State & DOM Element References */
+        let html5QrCode = null;
+        let isScanning = false;
+        let isTorchOn = false;
+        let scanCounter = 0;
+        let lastScannedCode = null;
+        let audioContext = null;
+        let isBeepEnabled = true;
+
+        // Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusPing = document.getElementById('statusPing');
+        const statusLabel = document.getElementById('statusLabel');
+        const scannerOffPlaceholder = document.getElementById('scannerOffPlaceholder');
+        const scannerHud = document.getElementById('scannerHud');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const refreshCamsBtn = document.getElementById('refreshCamsBtn');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const torchBtn = document.getElementById('torchBtn');
+        const beepBtn = document.getElementById('beepBtn');
+        const barcodeValue = document.getElementById('barcodeValue');
+        const barcodeFormat = document.getElementById('barcodeFormat');
+        const barcodeTime = document.getElementById('barcodeTime');
+        const scanCountBadge = document.getElementById('scanCountBadge');
+        const copyBtn = document.getElementById('copyBtn');
+        const clearResultBtn = document.getElementById('clearResultBtn');
+        const copyLogsBtn = document.getElementById('copyLogsBtn');
+        const clearLogsBtn = document.getElementById('clearLogsBtn');
+        const logConsole = document.getElementById('logConsole');
+        const telemetryResolution = document.getElementById('telemetryResolution');
+        const telemetryFocus = document.getElementById('telemetryFocus');
+        const telemetryTorch = document.getElementById('telemetryTorch');
+        const toast = document.getElementById('toastMessage');
+        const toastText = document.getElementById('toastText');
+        const hiddenCopyInput = document.getElementById('hiddenCopyInput');
+
+        /* Safe Toast Notification Helper (Never uses alert) */
+        let toastTimeout = null;
+        function showToast(msg, duration = 2000) {
+            toastText.textContent = msg;
+            toast.classList.remove('opacity-0');
+            toast.classList.add('opacity-100');
+            if (toastTimeout) clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0');
+            }, duration);
+        }
+
+        /* Diagnostic Logger Function */
+        function log(message, type = 'info') {
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const item = document.createElement('div');
+            item.className = 'flex items-start gap-1.5 leading-tight';
+
+            let colorClass = 'text-slate-400';
+            let badge = 'INFO';
+            if (type === 'error') {
+                colorClass = 'text-red-400';
+                badge = 'ERR';
+            } else if (type === 'success') {
+                colorClass = 'text-emerald-400';
+                badge = 'OK';
+            } else if (type === 'warn') {
+                colorClass = 'text-amber-400';
+                badge = 'WARN';
+            }
+
+            item.innerHTML = `<span class="text-slate-600 shrink-0">[${time}]</span> <span class="font-bold text-[9px] ${colorClass} shrink-0">[${badge}]</span> <span class="${colorClass}">${message}</span>`;
+            logConsole.appendChild(item);
+            logConsole.scrollTop = logConsole.scrollHeight;
+        }
+
+        /* Synthesized Web Audio Beep (iOS Compatible without external sound files) */
+        function playBeep() {
+            if (!isBeepEnabled) return;
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (!AudioContextClass) return;
+                if (!audioContext) {
+                    audioContext = new AudioContextClass();
+                }
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(1760, audioContext.currentTime); // High pitch crisp chime (A6)
+                gain.gain.setValueAtTime(0.12, audioContext.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.12);
+
+                osc.connect(gain);
+                gain.connect(audioContext.destination);
+
+                osc.start();
+                osc.stop(audioContext.currentTime + 0.12);
+            } catch (err) {
+                // Audio might be muted or blocked by iOS silent switch
+            }
+        }
+
+        // Initialize HTML5 QR Code Library Object
+        try {
+            html5QrCode = new Html5Qrcode("reader");
+            log("Html5Qrcode engine initialized", "info");
+        } catch (e) {
+            log(`Html5Qrcode init error: ${e.message}`, "error");
+        }
+
+        /* Query and populate camera list */
+        async function fetchCameras() {
+            cameraSelect.innerHTML = '<option value="">Enumerating cameras...</option>';
+            log("Querying available media video input devices...", "info");
+
+            try {
+                const devices = await Html5Qrcode.getCameras();
+                cameraSelect.innerHTML = '';
+
+                if (!devices || devices.length === 0) {
+                    cameraSelect.innerHTML = '<option value="">No cameras found</option>';
+                    log("No cameras reported by navigator.mediaDevices", "warn");
+                    return;
+                }
+
+                log(`Discovered ${devices.length} camera device(s)`, "success");
+
+                // Populate selector dropdown
+                let bestDefaultIndex = 0;
+                devices.forEach((dev, index) => {
+                    const option = document.createElement('option');
+                    option.value = dev.id;
+                    const labelLower = dev.label.toLowerCase();
+
+                    // Display friendly name or fallback
+                    option.textContent = dev.label || `Camera ${index + 1} (${dev.id.substring(0, 8)}...)`;
+
+                    // Smart detection for iPhone primary back lens
+                    // Usually back camera that is NOT ultra-wide (0.5x) is best for barcodes
+                    if (labelLower.includes('back') && !labelLower.includes('wide') && !labelLower.includes('0.5')) {
+                        bestDefaultIndex = index;
+                    } else if (labelLower.includes('back') || labelLower.includes('rear') || labelLower.includes('environment')) {
+                        bestDefaultIndex = index;
+                    }
+
+                    cameraSelect.appendChild(option);
+                    log(`Lens [${index}]: "${option.textContent}"`, "info");
+                });
+
+                cameraSelect.selectedIndex = bestDefaultIndex;
+                log(`Default selected lens: [${bestDefaultIndex}] ${cameraSelect.options[bestDefaultIndex].text}`, "info");
+
+            } catch (err) {
+                cameraSelect.innerHTML = '<option value="">Camera access blocked or error</option>';
+                log(`Failed to list cameras: ${err.name} - ${err.message}`, "error");
+                log("Tip: On iOS Safari, tap Start Scanner once to prompt permissions, then reload lenses.", "warn");
+            }
+        }
+
+        /* Update UI State (Idle / Scanning / Error) */
+        function setScanningState(scanning) {
+            isScanning = scanning;
+            if (scanning) {
+                statusDot.className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500";
+                statusPing.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75";
+                statusLabel.textContent = "SCANNING";
+                statusLabel.className = "text-xs font-semibold text-emerald-400 tracking-wide";
+                scannerOffPlaceholder.classList.add('opacity-0', 'pointer-events-none');
+                scannerHud.classList.remove('hidden');
+                startBtn.disabled = true;
+                startBtn.classList.add('opacity-40', 'cursor-not-allowed');
+                stopBtn.disabled = false;
+                stopBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+                cameraSelect.disabled = true;
+            } else {
+                statusDot.className = "relative inline-flex rounded-full h-2.5 w-2.5 bg-slate-500";
+                statusPing.className = "animate-ping absolute inline-flex h-full w-full rounded-full bg-slate-400 opacity-75";
+                statusLabel.textContent = "IDLE";
+                statusLabel.className = "text-xs font-semibold text-slate-400 tracking-wide";
+                scannerOffPlaceholder.classList.remove('opacity-0', 'pointer-events-none');
+                scannerHud.classList.add('hidden');
+                startBtn.disabled = false;
+                startBtn.classList.remove('opacity-40', 'cursor-not-allowed');
+                stopBtn.disabled = true;
+                stopBtn.classList.add('opacity-40', 'cursor-not-allowed');
+                cameraSelect.disabled = false;
+                torchBtn.disabled = true;
+                torchBtn.classList.remove('bg-amber-500/20', 'text-amber-400', 'border-amber-500/50');
+                isTorchOn = false;
+                telemetryResolution.textContent = "—";
+                telemetryFocus.textContent = "—";
+                telemetryTorch.textContent = "—";
+            }
+        }
+
+        /* Start Scanner */
+        async function startScanning() {
+            if (isScanning) return;
+
+            // AudioContext must be resumed on user gesture for iOS Safari
+            if (audioContext && audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            const selectedCameraId = cameraSelect.value;
+            let cameraConfig;
+
+            if (selectedCameraId) {
+                cameraConfig = { deviceId: { exact: selectedCameraId } };
+            } else {
+                // Fallback to back camera environment constraint
+                cameraConfig = { facingMode: "environment" };
+            }
+
+            // Scanner runtime settings: optimized for iPhone 1D/2D barcodes
+            const config = {
+                fps: 20, // 20 frames per sec offers high decode speed on iOS
+                qrbox: function(viewfinderWidth, viewfinderHeight) {
+                    // Rectangular box specifically suited for 1D barcodes and QR codes
+                    const width = Math.floor(viewfinderWidth * 0.85);
+                    const height = Math.floor(viewfinderHeight * 0.55);
+                    return { width, height };
+                },
+                aspectRatio: 1.333333, // 4:3 is standard native iPhone sensor ratio
+                experimentalFeatures: {
+                    useBarCodeDetectorIfSupported: true // Uses native Apple Vision API if exposed by WebKit
+                }
+            };
+
+            log(`Starting scanner on selected camera...`, "info");
+
+            try {
+                await html5QrCode.start(
+                    cameraConfig,
+                    config,
+                    onScanSuccess,
+                    onScanFailure
+                );
+
+                setScanningState(true);
+                log("Scanner stream active and decoding frames", "success");
+
+                // Query iOS Track capabilities & telemetry
+                inspectTrackCapabilities();
+
+            } catch (err) {
+                setScanningState(false);
+                log(`Failed to start scanner: ${err}`, "error");
+                showToast("Could not start camera. Check permissions.");
+            }
+        }
+
+        /* Stop Scanner */
+        async function stopScanning() {
+            if (!isScanning || !html5QrCode) return;
+            log("Stopping scanner...", "info");
+            try {
+                await html5QrCode.stop();
+                setScanningState(false);
+                log("Scanner stopped successfully", "info");
+            } catch (err) {
+                log(`Error while stopping: ${err}`, "error");
+                setScanningState(false);
+            }
+        }
+
+        /* Toggle iPhone Torch/Flashlight */
+        async function toggleTorch() {
+            if (!isScanning || !html5QrCode) return;
+            try {
+                isTorchOn = !isTorchOn;
+                await html5QrCode.applyVideoConstraints({
+                    advanced: [{ torch: isTorchOn }]
+                });
+
+                if (isTorchOn) {
+                    torchBtn.classList.add('bg-amber-500/20', 'text-amber-400', 'border-amber-500/50');
+                    log("Torch turned ON", "info");
+                } else {
+                    torchBtn.classList.remove('bg-amber-500/20', 'text-amber-400', 'border-amber-500/50');
+                    log("Torch turned OFF", "info");
+                }
+            } catch (err) {
+                log(`Torch toggle error: ${err.message}`, "warn");
+                showToast("Torch unsupported on this lens");
+                torchBtn.disabled = true;
+            }
+        }
+
+        /* Scan Success Callback */
+        function onScanSuccess(decodedText, decodedResult) {
+            // Prevent spamming logs if the user is hovering continuously over the same barcode
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+
+            // Format type detection
+            const format = decodedResult?.result?.format?.formatName || "BARCODE / QR";
+
+            // Update UI Fields
+            barcodeValue.textContent = decodedText;
+            barcodeFormat.textContent = format;
+            barcodeTime.textContent = timeString;
+
+            scanCounter++;
+            scanCountBadge.textContent = `${scanCounter} scan${scanCounter > 1 ? 's' : ''}`;
+
+            // Trigger feedback
+            playBeep();
+
+            // Haptic vibration (if supported by Safari/PWA)
+            if (navigator.vibrate) {
+                try { navigator.vibrate(50); } catch(e) {}
+            }
+
+            if (decodedText !== lastScannedCode) {
+                lastScannedCode = decodedText;
+                log(`Scanned [${format}]: "${decodedText}"`, "success");
+            }
+        }
+
+        /* Scan Failure Callback (Called per frame without a barcode; avoid flooding) */
+        let frameFailureCount = 0;
+        function onScanFailure(error) {
+            frameFailureCount++;
+            // Only log an occasional heartbeat in debug console every ~150 frames to verify the engine is analyzing
+            if (frameFailureCount % 150 === 0) {
+                // Heartbeat to confirm processing
+            }
+        }
+
+        /* Inspect track capabilities to extract native resolution, focus mode, and torch */
+        function inspectTrackCapabilities() {
+            try {
+                const stream = html5QrCode.getRunningTrackCameraCapabilities?.() || null;
+                const settings = html5QrCode.getRunningTrackSettings?.() || {};
+                const capabilities = html5QrCode.getRunningTrackCapabilities?.() || {};
+
+                // Resolution
+                const width = settings.width || 0;
+                const height = settings.height || 0;
+                telemetryResolution.textContent = width && height ? `${width}×${height}` : 'Active';
+
+                // Focus & Frame Rate
+                const fps = Math.round(settings.frameRate || 0);
+                const focus = capabilities.focusMode ? capabilities.focusMode.join('/') : 'std';
+                telemetryFocus.textContent = fps ? `${fps}fps · ${focus}` : 'Default';
+
+                // Torch capability
+                const hasTorch = capabilities.torch || (capabilities.fillLightMode && capabilities.fillLightMode.includes('flash'));
+                if (hasTorch) {
+                    telemetryTorch.textContent = "Supported";
+                    torchBtn.disabled = false;
+                } else {
+                    telemetryTorch.textContent = "No Support";
+                    torchBtn.disabled = true;
+                }
+
+                log(`Track Info: ${width}x${height}@${fps}fps, Torch: ${hasTorch ? 'YES' : 'NO'}`, "info");
+            } catch (err) {
+                log(`Telemetry query info: ${err.message}`, "warn");
+                telemetryResolution.textContent = "Active";
+                telemetryFocus.textContent = "Auto";
+                telemetryTorch.textContent = "Unknown";
+            }
+        }
+
+        /* Copy Barcode to Clipboard (Strictly using document.execCommand for sandbox/iframe safety) */
+        function copyBarcodeToClipboard() {
+            const text = barcodeValue.textContent.trim();
+            if (!text || text === "No barcode detected yet") {
+                showToast("No barcode to copy");
+                return;
+            }
+
+            hiddenCopyInput.value = text;
+            hiddenCopyInput.select();
+            hiddenCopyInput.setSelectionRange(0, 99999); // Mobile Safari selection
+
+            let successful = false;
+            try {
+                successful = document.execCommand('copy');
+            } catch (err) {
+                successful = false;
+            }
+
+            if (successful) {
+                showToast("Barcode copied!");
+                log(`Copied barcode to clipboard: ${text}`, "info");
+            } else {
+                // Fallback attempt
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(text).then(() => {
+                        showToast("Barcode copied!");
+                    }).catch(() => {
+                        showToast("Failed to copy");
+                    });
+                } else {
+                    showToast("Clipboard write permission denied");
+                }
+            }
+        }
+
+        /* Copy Diagnostic Logs */
+        function copyAllLogs() {
+            const logEntries = Array.from(logConsole.querySelectorAll('div'))
+                .map(div => div.innerText)
+                .join('\n');
+
+            if (!logEntries) {
+                showToast("No logs to copy");
+                return;
+            }
+
+            hiddenCopyInput.value = logEntries;
+            hiddenCopyInput.select();
+            hiddenCopyInput.setSelectionRange(0, 99999);
+
+            try {
+                document.execCommand('copy');
+                showToast("Logs copied to clipboard!");
+            } catch (e) {
+                showToast("Unable to copy logs");
+            }
+        }
+
+        /* Event Listeners Wire-up */
+        startBtn.addEventListener('click', startScanning);
+        stopBtn.addEventListener('click', stopScanning);
+        torchBtn.addEventListener('click', toggleTorch);
+
+        beepBtn.addEventListener('click', () => {
+            isBeepEnabled = !isBeepEnabled;
+            if (isBeepEnabled) {
+                beepBtn.classList.remove('bg-slate-800', 'text-slate-400', 'border-slate-700');
+                beepBtn.classList.add('bg-blue-900/30', 'text-blue-400', 'border-blue-500/30');
+                showToast("Audio beep ON");
+                playBeep();
+            } else {
+                beepBtn.classList.remove('bg-blue-900/30', 'text-blue-400', 'border-blue-500/30');
+                beepBtn.classList.add('bg-slate-800', 'text-slate-400', 'border-slate-700');
+                showToast("Audio beep OFF");
+            }
+        });
+
+        copyBtn.addEventListener('click', copyBarcodeToClipboard);
+
+        clearResultBtn.addEventListener('click', () => {
+            barcodeValue.textContent = "No barcode detected yet";
+            barcodeFormat.textContent = "—";
+            barcodeTime.textContent = "—";
+            lastScannedCode = null;
+            showToast("Result cleared");
+        });
+
+        refreshCamsBtn.addEventListener('click', async () => {
+            if (isScanning) {
+                await stopScanning();
+            }
+            await fetchCameras();
+            showToast("Cameras refreshed");
+        });
+
+        copyLogsBtn.addEventListener('click', copyAllLogs);
+
+        clearLogsBtn.addEventListener('click', () => {
+            logConsole.innerHTML = '';
+            log("Logs cleared", "info");
+        });
+
+        // Auto restart scan on camera lens change
+        cameraSelect.addEventListener('change', async () => {
+            log(`Selected lens changed to: ${cameraSelect.options[cameraSelect.selectedIndex]?.text}`, "info");
+            if (isScanning) {
+                await stopScanning();
+                await startScanning();
+            }
+        });
+
+        /* Initial Page Load Execution */
+        window.addEventListener('load', async () => {
+            log("System initialized. User agent: " + navigator.userAgent, "info");
+            // Check if running in iOS Safari
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            if (isIOS) {
+                log("Platform: iOS Safari / WebKit detected", "info");
+            } else {
+                log("Platform: Desktop or non-iOS browser", "info");
+            }
+
+            // Initial fetch of cameras
+            await fetchCameras();
+        });
+    </script>
+</body>
+</html>
