@@ -13,10 +13,13 @@
     h1 { font-size: 1.5rem; margin: 0 0 8px; }
     p { margin: 8px 0 16px; }
     #reader { width: 100%; background: white; }
+    #reader.scan-success { outline: 4px solid #15803d; }
     /* Keep the library's video geometry intact; no crop or fixed height. */
     button, select { font: inherit; min-height: 44px; max-width: 100%; margin: 4px; }
     button { cursor: pointer; }
     .result { margin-top: 20px; padding: 16px; background: white; border: 1px solid #bcc5d0; border-radius: 8px; }
+    .result.scan-success { background: #dcfce7; border-color: #15803d; }
+    #scan-feedback { min-height: 1.5em; color: #166534; font-weight: 600; margin: 12px 0; }
     h2 { font-size: 1rem; margin: 0 0 8px; }
     output { display: block; min-height: 2.5em; overflow-wrap: anywhere; white-space: pre-wrap; font: 1.6rem/1.4 ui-monospace, monospace; user-select: text; -webkit-user-select: text; }
     #scan-info { color: #4c5968; margin-bottom: 0; }
@@ -29,13 +32,14 @@
     <h1>Barcode scanner test</h1>
     <p>Allow camera access, choose a rear camera, and start scanning. Keep the entire barcode visible and move it back until sharp.</p>
     <div id="reader" aria-label="Barcode camera and controls"></div>
+    <p id="scan-feedback" role="status">Ready when you start the camera.</p>
     <p id="error" role="alert" hidden></p>
     <section class="result" aria-labelledby="output-heading">
       <h2 id="output-heading">Scanned barcode</h2>
       <output id="barcode" aria-live="polite">No barcode scanned yet</output>
       <p id="scan-info">Waiting for a scan.</p>
     </section>
-    <small>html5-qrcode 2.3.8 · Full-frame scanning · Raw values, no ISBN filtering.<br>Open this page over HTTPS on your iPhone. Internet access is needed to load the scanner library.</small>
+    <small>A green flash and short beep confirm a scan. Feedback for the same barcode repeats at most every two seconds. Sound depends on your phone's audio settings.<br>html5-qrcode 2.3.8 · Full-frame scanning · Raw values, no ISBN filtering.<br>Open this page over HTTPS on your iPhone. Internet access is needed to load the scanner library.</small>
     <noscript><p>Enable JavaScript to use the scanner.</p></noscript>
   </main>
   <script>
@@ -53,6 +57,58 @@
       if (!window.Html5QrcodeScanner) {
         showError('html5-qrcode could not load. Check your internet connection and reload this page.');
         return;
+      }
+
+      const reader = document.getElementById('reader');
+      const resultPanel = document.querySelector('.result');
+      const feedback = document.getElementById('scan-feedback');
+      let audioContext;
+      let feedbackTimer;
+      let lastFeedbackText;
+      let lastFeedbackAt = -Infinity;
+
+      // iPhone Safari requires audio to be unlocked by a user gesture.
+      // Capture taps on the library's camera controls before scanning begins.
+      reader.addEventListener('click', () => {
+        try {
+          const AudioContext = window.AudioContext || window.webkitAudioContext;
+          if (!AudioContext) return;
+          audioContext ||= new AudioContext();
+          if (audioContext.state !== 'running') audioContext.resume().catch(() => {});
+        } catch { /* Visual confirmation still works without audio. */ }
+      }, true);
+
+      function confirmScan(text) {
+        const now = performance.now();
+        // Decoding runs at 10 fps; avoid a beep on every matching frame.
+        if (text === lastFeedbackText && now - lastFeedbackAt < 2000) return;
+        lastFeedbackText = text;
+        lastFeedbackAt = now;
+        reader.classList.add('scan-success');
+        resultPanel.classList.add('scan-success');
+        feedback.textContent = '✓ Scan successful';
+        clearTimeout(feedbackTimer);
+        feedbackTimer = setTimeout(() => {
+          reader.classList.remove('scan-success');
+          resultPanel.classList.remove('scan-success');
+          feedback.textContent = 'Last scan successful — ready for another barcode.';
+        }, 900);
+
+        try {
+          if (audioContext?.state !== 'running') return;
+          const tone = audioContext.createOscillator();
+          const volume = audioContext.createGain();
+          const start = audioContext.currentTime;
+          tone.frequency.value = 1046;
+          volume.gain.setValueAtTime(0, start);
+          volume.gain.linearRampToValueAtTime(0.15, start + 0.01);
+          volume.gain.linearRampToValueAtTime(0, start + 0.14);
+          tone.connect(volume);
+          volume.connect(audioContext.destination);
+          tone.onended = () => { tone.disconnect(); volume.disconnect(); };
+          tone.start(start);
+          tone.stop(start + 0.15);
+        } catch { /* Audio failure must never interrupt barcode scanning. */ }
       }
 
       try {
@@ -75,6 +131,7 @@
           const format = decodedResult?.result?.format?.formatName || 'Barcode';
           document.getElementById('scan-info').textContent =
             `${format} · Last detected ${new Date().toLocaleTimeString()}`;
+          confirmScan(decodedText);
         }, () => {
           // A frame without a barcode is normal. Camera errors appear in the
           // library's controls; do not overwrite the last successful result.
