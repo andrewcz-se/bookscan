@@ -187,6 +187,9 @@ function openModal(book) {
   const fields = { isbn: 'isbn', title: 'title', authors: 'authors', date: 'publish_date', publisher: 'publisher', pages: 'number_of_pages', description: 'description', binding: 'binding', edition: 'edition', status: 'status', location: 'location', notes: 'notes' };
   for (const [id, key] of Object.entries(fields)) $(`book-${id}`).value = book[key] ?? '';
   $('book-subjects').value = normalizeSubjects(book.subjects).join('\n');
+  $('refresh-details').hidden = !book.id;
+  $('refresh-details').disabled = false;
+  $('metadata-details-status').textContent = '';
   $('book-status').value = book.status || 'To Read';
   document.querySelectorAll('[name="rating"]').forEach(input => { input.checked = Number(input.value) === book.rating; });
   updateStars();
@@ -217,6 +220,47 @@ function closeModal() {
 function updateStars() {
   const rating = Number(document.querySelector('[name="rating"]:checked')?.value || 0);
   document.querySelectorAll('#rating-stars label').forEach((label, index) => label.classList.toggle('filled', index < rating));
+}
+
+async function refreshDetails() {
+  if (!editing || $('refresh-details').disabled) return;
+  const target = editing;
+  const fields = ['description', 'subjects', 'binding', 'edition'];
+  const missing = fields.filter(key => !$(`book-${key}`).value.trim());
+  if (!missing.length) {
+    $('metadata-details-status').textContent = 'These details are already filled in.';
+    return;
+  }
+  if (!navigator.onLine) {
+    $('metadata-details-status').textContent = 'Connect to the internet to look up missing details.';
+    return;
+  }
+  $('refresh-details').disabled = true;
+  $('metadata-details-status').textContent = 'Looking up missing details…';
+  try {
+    const metadata = await lookupMetadata(target.isbn);
+    // Closing, saving, or switching books invalidates this form's pending lookup.
+    if (editing !== target) return;
+    if (!metadata) {
+      $('metadata-details-status').textContent = 'Could not retrieve details. Try again when the book services are available.';
+      return;
+    }
+    let filled = 0;
+    for (const key of missing) {
+      const input = $(`book-${key}`);
+      const value = key === 'subjects' ? normalizeSubjects(metadata.subjects).join('\n') : metadata[key];
+      // Also preserve anything typed while the request was in flight.
+      if (!input.value.trim() && value) { input.value = value; filled++; }
+    }
+    const remaining = fields.filter(key => !$(`book-${key}`).value.trim());
+    $('metadata-details-status').textContent = filled
+      ? `Filled ${filled} ${filled === 1 ? 'field' : 'fields'}. Save book to keep the changes.${remaining.length ? ` No data returned for: ${remaining.join(', ')}. You can enter these manually or retry later.` : ''}`
+      : 'No additional details were filled in. The service may have no data or a detail request may have failed; you can enter details manually or retry later.';
+  } catch {
+    if (editing === target) $('metadata-details-status').textContent = 'The lookup failed. Your edits are preserved; try again later.';
+  } finally {
+    if (editing === target) $('refresh-details').disabled = false;
+  }
 }
 
 async function saveBook(event) {
@@ -280,6 +324,7 @@ async function init() {
   $('status-filter').addEventListener('change', render);
   $('export').addEventListener('click', exportCsv);
   $('book-form').addEventListener('submit', saveBook);
+  $('refresh-details').addEventListener('click', refreshDetails);
   ['modal-close', 'modal-cancel'].forEach(id => $(id).addEventListener('click', closeModal));
   $('rating-stars').addEventListener('change', updateStars);
   $('clear-rating').addEventListener('click', () => { document.querySelectorAll('[name="rating"]').forEach(input => { input.checked = false; }); updateStars(); });

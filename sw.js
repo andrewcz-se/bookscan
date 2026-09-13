@@ -1,13 +1,14 @@
 /* Increment this version whenever changing a shipped local file or dependency. */
 const PREFIX = `bookscan-${new URL(self.registration.scope).pathname}-`;
-const CACHE = `${PREFIX}v3`;
+const CACHE = `${PREFIX}v4`;
 const LOCAL = ['./', './index.html', './styles.css', './js/app.js', './js/isbn.js', './js/metadata.js', './js/db.js', './js/csv.js', './js/scanner.js', './manifest.webmanifest', './assets/icon.svg', './assets/icon-192.png', './assets/icon-512.png', './assets/book-placeholder.svg'];
 const CDN = ['https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js', 'https://unpkg.com/dexie@4.0.11/dist/dexie.js', 'https://cdn.tailwindcss.com'];
 
 self.addEventListener('install', event => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    await cache.addAll(LOCAL);
+    // A new cache version must not reuse stale scripts from the HTTP cache.
+    await cache.addAll(LOCAL.map(path => new Request(new URL(path, self.registration.scope), { cache: 'reload' })));
     // Required CDN libraries must cache successfully before this worker installs.
     // An unsuccessful update leaves the previous working offline app untouched.
     await Promise.all(CDN.slice(0, 2).map(async url => {

@@ -84,6 +84,8 @@
         <label for="book-authors">Author</label><input id="book-authors" maxlength="500" placeholder="Author name">
         <div class="form-grid"><div><label for="book-date">Publication date</label><input id="book-date" maxlength="80" placeholder="Year or date"></div><div><label for="book-pages">Pages</label><input id="book-pages" type="number" inputmode="numeric" min="1" max="100000" step="1"></div></div>
         <label for="book-publisher">Publisher</label><input id="book-publisher" maxlength="300">
+        <button id="refresh-details" class="text-button" type="button" hidden>Fill missing details</button>
+        <p id="metadata-details-status" class="field-help" role="status" aria-live="polite"></p>
         <div class="form-grid"><div><label for="book-binding">Binding / format</label><input id="book-binding" placeholder="e.g. Paperback"></div><div><label for="book-edition">Edition</label><input id="book-edition" placeholder="e.g. 2nd revised edition"></div></div>
         <label for="book-description">Description</label><textarea id="book-description" rows="5" placeholder="Book summary"></textarea>
         <label for="book-subjects">Subjects</label><textarea id="book-subjects" rows="3" placeholder="e.g. Fiction" aria-describedby="subjects-help"></textarea>
