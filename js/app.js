@@ -56,25 +56,16 @@ function render() {
   for (const book of filtered) {
     const card = element('article', 'book-card');
     card.id = `book-${book.id}`;
-    const main = element('div', 'book-main');
-    const cover = element('img', 'cover');
-    cover.alt = `Cover of ${book.title}`;
-    cover.loading = 'lazy';
-    cover.decoding = 'async';
-    cover.width = 75;
-    cover.height = 112;
-    cover.referrerPolicy = 'no-referrer';
-    cover.src = safeCover(book.cover) || './assets/book-placeholder.svg';
-    cover.addEventListener('error', () => { cover.src = './assets/book-placeholder.svg'; }, { once: true });
     const info = element('div', 'book-info');
     info.append(element('h3', '', book.title), element('p', 'book-author', book.authors || 'Unknown author'));
     const year = String(book.publish_date || '').match(/\b\d{4}\b/)?.[0] || book.publish_date;
-    info.append(element('p', 'book-meta', [year, book.number_of_pages ? `${book.number_of_pages} pages` : '', book.binding, book.edition].filter(Boolean).join(' · ') || 'Edition details unavailable'));
-    main.append(cover, info);
+    const summary = [year, book.number_of_pages ? `${book.number_of_pages} pages` : ''].filter(Boolean).join(' · ');
+    if (summary) info.append(element('p', 'book-meta', summary));
     const tags = element('div', 'book-tags');
     tags.append(element('span', `pill ${book.status === 'Reading' ? 'reading' : book.status === 'Finished' ? 'finished' : ''}`, book.status));
     if (book.location) tags.append(element('span', 'pill location', book.location));
     const bottom = element('div', 'card-bottom');
+    bottom.append(tags);
     if (book.rating) {
       const rating = element('span', 'card-rating', '★'.repeat(book.rating) + '☆'.repeat(5 - book.rating));
       rating.setAttribute('aria-label', `${book.rating} out of 5 stars`);
@@ -91,7 +82,7 @@ function render() {
     remove.addEventListener('click', event => { event.stopPropagation(); deleteBook(book); });
     actions.append(edit, remove);
     bottom.append(actions);
-    card.append(main, tags, bottom);
+    card.append(info, bottom);
     card.addEventListener('click', () => openModal(book));
     fragment.append(card);
   }
@@ -184,6 +175,12 @@ function openModal(book) {
   $('modal-title').textContent = book.id ? 'A closer look' : 'Add book details';
   $('modal-eyebrow').textContent = book.id ? 'YOUR LIBRARY / EDIT BOOK' : 'ONE MORE DETAIL';
   $('modal-description').textContent = book.id ? `ISBN ${book.isbn} · ${book.source || 'Manual'}${book.source === 'Open Library Search' ? ' · Work-level details; edition may differ.' : ''}` : 'We couldn’t retrieve a match. Add a title and any details you know to save this book.';
+  const cover = $('book-cover');
+  cover.hidden = !book.id && !book.cover;
+  cover.alt = `Cover of ${book.title || 'this book'}`;
+  cover.onerror = () => { cover.onerror = null; cover.src = './assets/book-placeholder.svg'; };
+  if (!cover.hidden) cover.src = safeCover(book.cover) || './assets/book-placeholder.svg';
+  else cover.removeAttribute('src');
   const fields = { isbn: 'isbn', title: 'title', authors: 'authors', date: 'publish_date', publisher: 'publisher', pages: 'number_of_pages', description: 'description', binding: 'binding', edition: 'edition', status: 'status', location: 'location', notes: 'notes' };
   for (const [id, key] of Object.entries(fields)) $(`book-${id}`).value = book[key] ?? '';
   $('book-subjects').value = normalizeSubjects(book.subjects).join('\n');
@@ -207,6 +204,8 @@ function closeModal() {
   modalOpen = false;
   editing = null;
   $('modal').hidden = true;
+  $('book-cover').onerror = null;
+  $('book-cover').removeAttribute('src');
   document.body.style.overflow = '';
   document.querySelector('main').removeAttribute('aria-hidden');
   document.querySelector('header').removeAttribute('aria-hidden');
