@@ -1,6 +1,7 @@
 import { normalizeIsbn } from './isbn.js';
+import { BarcodeCamera } from './barcode-camera.js';
 
-/** The qrbox callback controls BOTH the drawn frame and actual decode region. */
+/** Shared by the guide and the camera-pixel decode region. */
 export function scanBox(width, height) {
   return { width: Math.floor(width * .9), height: Math.floor(Math.min(height * .7, width * .48)) };
 }
@@ -12,8 +13,7 @@ export function preferredCamera(cameras) {
     cameras.find(c => /back|rear|environment/i.test(c.label) && /wide|main|standard/i.test(c.label) && !/ultra|tele|dual|triple/i.test(c.label));
 }
 
-/** start() in html5-qrcode 2.3.8 resolves before its `playing` handler creates
- * the decode canvas. Do not permit stop/switch/pause until that handler ran. */
+/** Do not enable camera controls until the stream and decoder are ready. */
 export function waitForScannerReady(engine, video, timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
@@ -41,7 +41,8 @@ export function cameraErrorMessage(error) {
 }
 
 export class BookScanner {
-  constructor({ onScan, toast }) {
+  constructor({ onScan, toast, createEngine = id => new BarcodeCamera(id) }) {
+    this.createEngine = createEngine;
     this.onScan = onScan;
     this.toast = toast;
     this.engine = null;
@@ -61,8 +62,7 @@ export class BookScanner {
     // start() resolves. Do not crop, transform, or mirror the rendered stream.
     this.observer = new MutationObserver(() => this.setInline());
     this.observer.observe(this.reader, { childList: true, subtree: true });
-    // html5-qrcode calculates its crop at start. Recreate that crop after a
-    // viewport-width change so rotation cannot leave the frame out of alignment.
+    // Reopen after rotation so the camera can renegotiate portrait/landscape.
     this.viewportWidth = window.innerWidth;
     window.addEventListener('resize', () => {
       if (this.viewportWidth === window.innerWidth) return;
@@ -80,6 +80,7 @@ export class BookScanner {
       if (document.hidden && this.running && !this.busy) this.stop();
     });
     window.addEventListener('pagehide', () => {
+      this.engine?.stop();
       this.reader.querySelector('video')?.srcObject?.getTracks().forEach(track => track.stop());
     });
   }
@@ -112,11 +113,8 @@ export class BookScanner {
       this.toast('Camera access needs HTTPS or localhost. You can still enter an ISBN.', 'error');
       return;
     }
-    if (!window.Html5Qrcode) {
-      this.toast('The scanner library could not load. Connect to the internet and reload, or enter an ISBN.', 'error');
-      return;
-    }
     this.busy = true;
+    this.runtimeError = null;
     this.update('Opening camera…');
     try {
       let devices = [];
@@ -125,14 +123,14 @@ export class BookScanner {
       // opening it. On first use let Safari select environment; never immediately
       // stop a newly opened stream merely to change lenses.
       const requestedId = deviceId || preferredCamera(devices)?.deviceId;
-      if (!this.engine) this.engine = new window.Html5Qrcode('reader', {
-        formatsToSupport: [window.Html5QrcodeSupportedFormats.EAN_13],
-        useBarCodeDetectorIfSupported: true,
-        verbose: false
-      });
+      if (!this.engine) this.engine = this.createEngine('reader');
       await this.engine.start(requestedId ? { deviceId: { exact: requestedId } } : { facingMode: 'environment' }, {
-        fps: 10, qrbox: scanBox, disableFlip: true
-      }, text => this.detect(text), () => {});
+        fps: 8, qrbox: scanBox
+      }, text => this.confirmDetection(text), error => {
+        this.runtimeError = error;
+        this.toast(error.message || 'Barcode decoding failed. Restart the camera.', 'error');
+        void this.stop();
+      });
       this.setInline();
       await waitForScannerReady(this.engine, this.reader.querySelector('video'));
       this.running = true;
@@ -158,13 +156,13 @@ export class BookScanner {
       this.torchOn = false;
       this.torchButton.textContent = 'Light off';
       this.torchButton.setAttribute('aria-pressed', 'false');
-      if (this.suspended) this.engine.pause(false);
+      if (this.suspended) this.engine.pause();
     } catch (error) {
       console.error('Bookscan camera startup failed:', error);
       // The engine may own a stream even when startup never reached `running`.
       // Keep references before stop() removes the video's tracks and DOM node.
       const tracks = this.reader.querySelector('video')?.srcObject?.getTracks() || [];
-      try { await this.engine?.stop(); } catch { /* A failed render may have no canvas to remove. */ }
+      try { await this.engine?.stop(); } catch { /* Startup may already have cleaned up. */ }
       tracks.forEach(track => track.stop());
       this.running = false;
       try { this.engine?.clear(); } catch { /* Already cleared. */ }
@@ -177,13 +175,14 @@ export class BookScanner {
     } finally {
       this.busy = false;
       this.update(this.suspended && this.running ? 'Paused while book details are open' : undefined);
-      if (document.hidden && this.running) await this.stop();
+      if ((document.hidden || this.runtimeError) && this.running) await this.stop();
     }
   }
 
   async stop() {
     if (this.busy || !this.running) return;
     this.busy = true;
+    this.candidate = null;
     this.update('Pausing camera…');
     try { await this.engine.stop(); }
     catch {
@@ -205,13 +204,25 @@ export class BookScanner {
 
   suspend(value) {
     this.suspended = value;
+    this.candidate = null;
     if (this.running && !this.busy) {
       try {
-        if (value) this.engine.pause(false);
+        if (value) this.engine.pause();
         else { this.nextScanAt = Date.now() + 2000; this.engine.resume(); }
       } catch { /* State may have changed during camera switching. */ }
       this.update(value ? 'Paused while book details are open' : undefined);
     }
+  }
+
+  confirmDetection(text) {
+    if (this.suspended || this.busy || Date.now() < this.nextScanAt) return;
+    let isbn;
+    try { isbn = normalizeIsbn(text); } catch { return; }
+    const now = Date.now();
+    if (this.candidate?.isbn === isbn && now - this.candidate.at < 1000) {
+      this.candidate = null;
+      this.detect(isbn);
+    } else this.candidate = { isbn, at: now };
   }
 
   detect(text) {

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Scanner browser regression</title>
+<link rel="stylesheet" href="../styles.css">
+<style>body{padding:24px}#reader{width:327px;overflow:hidden}button{padding:12px;border:1px solid}pre{white-space:pre-wrap}.barcode-guide{box-sizing:content-box}</style>
+<h1>Scanner browser regression</h1>
+<p>Uses the screenshot fixture as a simulated camera. No physical camera, book lookup, or catalog writes.</p>
+<button id="run">Run scanner regression</button>
+<pre id="result" role="status">Ready.</pre>
+<div id="reader"></div>
+<button id="camera-toggle">Start camera</button><button id="camera-start">Start scanning</button>
+<div id="camera-idle"><p id="camera-hint"></p></div><p id="camera-status"></p>
+<label id="camera-choice-label">Camera<select id="camera-choice"></select></label><button id="torch">Light off</button>
+<script type="module">
+import { BookScanner } from '../js/scanner.js';
+const result = document.getElementById('result');
+document.getElementById('run').onclick = async () => {
+  const button = document.getElementById('run');
+  button.disabled = true;
+  let scanner, drawTimer;
+  const streams = [], captures = [], errors = [];
+  const originalGet = navigator.mediaDevices.getUserMedia;
+  const originalEnum = navigator.mediaDevices.enumerateDevices;
+  const log = message => { result.textContent += '\n' + message; };
+  const check = (condition, message) => { if (!condition) throw new Error(message); log('PASS: ' + message); };
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const awaitCapture = async count => {
+    const start = performance.now();
+    while (captures.length < count && performance.now() - start < 7000 && !errors.length) await wait(50);
+    check(captures.length === count, `Capture ${count}: ${captures.at(-1) || errors.join('; ') || 'timed out'}`);
+  };
+  try {
+    result.textContent = 'Running actual module worker and WASM…';
+    const response = await fetch('./fixtures/IMG_1507-scan-region.rgba.gz');
+    const bytes = new Uint8ClampedArray(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    const source = document.createElement('canvas');
+    source.width = 981; source.height = 1308;
+    const context = source.getContext('2d');
+    const pixels = new ImageData(bytes, 882, 470);
+    const draw = () => { context.fillStyle = '#222'; context.fillRect(0, 0, source.width, source.height); context.putImageData(pixels, 49, 419); };
+    draw(); drawTimer = setInterval(draw, 100);
+    navigator.mediaDevices.getUserMedia = async () => {
+      const stream = source.captureStream(10); streams.push(stream); return stream;
+    };
+    navigator.mediaDevices.enumerateDevices = async () => [];
+    scanner = new BookScanner({ onScan: value => captures.push(value), toast: error => errors.push(error) });
+    const started = performance.now();
+    await scanner.start();
+    await awaitCapture(1);
+    check(captures[0] === '9780333761366', `Correct ISBN in ${Math.round(performance.now() - started)} ms including startup and two-frame confirmation`);
+    scanner.suspend(true);
+    scanner.nextScanAt = 0;
+    await wait(650);
+    check(captures.length === 1, 'Suspended decoder does not capture');
+    scanner.suspend(false); scanner.nextScanAt = 0;
+    await awaitCapture(2);
+    await scanner.stop();
+    check(streams[0].getTracks().every(track => track.readyState === 'ended'), 'Stop releases the camera');
+    scanner.nextScanAt = 0;
+    await scanner.start();
+    await awaitCapture(3);
+    await scanner.stop();
+    check(errors.length === 0, 'No runtime errors');
+    log('ALL BROWSER CHECKS PASSED');
+  } catch (error) { log('FAIL: ' + error.message); }
+  finally {
+    await scanner?.stop(); clearInterval(drawTimer);
+    streams.forEach(stream => stream.getTracks().forEach(track => track.stop()));
+    navigator.mediaDevices.getUserMedia = originalGet;
+    navigator.mediaDevices.enumerateDevices = originalEnum;
+    button.disabled = false;
+  }
+};
+</script></html>
