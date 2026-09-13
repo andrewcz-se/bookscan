@@ -1,5 +1,5 @@
 import { normalizeIsbn } from './isbn.js';
-import { lookupMetadata, safeCover } from './metadata.js';
+import { lookupMetadata, safeCover, normalizeSubjects } from './metadata.js';
 import { createDatabase, insertBook } from './db.js';
 import { buildCsv, downloadFile } from './csv.js';
 import { BookScanner } from './scanner.js';
@@ -50,7 +50,7 @@ function render() {
   const query = $('search').value.trim().toLocaleLowerCase();
   const status = $('status-filter').value;
   const filtered = books.filter(book => (!status || book.status === status) &&
-    [book.title, book.authors, book.location].some(value => String(value || '').toLocaleLowerCase().includes(query)));
+    [book.title, book.authors, book.location, ...normalizeSubjects(book.subjects)].some(value => String(value || '').toLocaleLowerCase().includes(query)));
   $('result-count').textContent = books.length ? `${filtered.length} ${filtered.length === 1 ? 'book' : 'books'}${query || status ? ` of ${books.length}` : ' in your catalog'}` : '';
   const fragment = document.createDocumentFragment();
   for (const book of filtered) {
@@ -69,7 +69,7 @@ function render() {
     const info = element('div', 'book-info');
     info.append(element('h3', '', book.title), element('p', 'book-author', book.authors || 'Unknown author'));
     const year = String(book.publish_date || '').match(/\b\d{4}\b/)?.[0] || book.publish_date;
-    info.append(element('p', 'book-meta', [year, book.number_of_pages ? `${book.number_of_pages} pages` : ''].filter(Boolean).join(' · ') || 'Edition details unavailable'));
+    info.append(element('p', 'book-meta', [year, book.number_of_pages ? `${book.number_of_pages} pages` : '', book.binding, book.edition].filter(Boolean).join(' · ') || 'Edition details unavailable'));
     main.append(cover, info);
     const tags = element('div', 'book-tags');
     tags.append(element('span', `pill ${book.status === 'Reading' ? 'reading' : book.status === 'Finished' ? 'finished' : ''}`, book.status));
@@ -184,8 +184,9 @@ function openModal(book) {
   $('modal-title').textContent = book.id ? 'A closer look' : 'Add book details';
   $('modal-eyebrow').textContent = book.id ? 'YOUR LIBRARY / EDIT BOOK' : 'ONE MORE DETAIL';
   $('modal-description').textContent = book.id ? `ISBN ${book.isbn} · ${book.source || 'Manual'}${book.source === 'Open Library Search' ? ' · Work-level details; edition may differ.' : ''}` : 'We couldn’t retrieve a match. Add a title and any details you know to save this book.';
-  const fields = { isbn: 'isbn', title: 'title', authors: 'authors', date: 'publish_date', publisher: 'publisher', pages: 'number_of_pages', status: 'status', location: 'location', notes: 'notes' };
+  const fields = { isbn: 'isbn', title: 'title', authors: 'authors', date: 'publish_date', publisher: 'publisher', pages: 'number_of_pages', description: 'description', binding: 'binding', edition: 'edition', status: 'status', location: 'location', notes: 'notes' };
   for (const [id, key] of Object.entries(fields)) $(`book-${id}`).value = book[key] ?? '';
+  $('book-subjects').value = normalizeSubjects(book.subjects).join('\n');
   $('book-status').value = book.status || 'To Read';
   document.querySelectorAll('[name="rating"]').forEach(input => { input.checked = Number(input.value) === book.rating; });
   updateStars();
@@ -227,6 +228,10 @@ async function saveBook(event) {
   $('save-book').disabled = true;
   $('form-error').textContent = '';
   const book = { ...editing, title, authors: $('book-authors').value.trim(), publish_date: $('book-date').value.trim(), publisher: $('book-publisher').value.trim(), number_of_pages: $('book-pages').value ? Number($('book-pages').value) : null, status: $('book-status').value, location: $('book-location').value.trim(), rating: Number(document.querySelector('[name="rating"]:checked')?.value) || null, notes: $('book-notes').value.trim(), updatedAt: new Date().toISOString() };
+  book.description = $('book-description').value.trim();
+  book.subjects = normalizeSubjects($('book-subjects').value);
+  book.binding = $('book-binding').value.trim();
+  book.edition = $('book-edition').value.trim();
   try {
     if (book.id) {
       // update() cannot resurrect a record another tab has just deleted.

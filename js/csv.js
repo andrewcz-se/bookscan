@@ -2,7 +2,8 @@ const columns = [
   ['ISBN', 'isbn'], ['Title', 'title'], ['Author', 'authors'], ['Publication date', 'publish_date'],
   ['Publisher', 'publisher'], ['Pages', 'number_of_pages'], ['Reading status', 'status'],
   ['Shelf / Room', 'location'], ['Rating', 'rating'], ['Notes', 'notes'], ['Cover URL', 'cover'],
-  ['Metadata source', 'source'], ['Added', 'createdAt'], ['Updated', 'updatedAt']
+  ['Metadata source', 'source'], ['Added', 'createdAt'], ['Updated', 'updatedAt'],
+  ['Description', 'description'], ['Subjects', 'subjects'], ['Binding', 'binding'], ['Edition', 'edition']
 ];
 
 export function csvCell(value) {
@@ -14,7 +15,7 @@ export function csvCell(value) {
 
 export function buildCsv(books) {
   const rows = [columns.map(([label]) => csvCell(label)).join(',')];
-  for (const book of books) rows.push(columns.map(([, key]) => csvCell(book[key])).join(','));
+  for (const book of books) rows.push(columns.map(([, key]) => csvCell(key === 'subjects' && Array.isArray(book[key]) ? book[key].join('\n') : book[key])).join(','));
   return '\uFEFF' + rows.join('\r\n') + '\r\n'; // BOM for Excel; CRLF and quoted multiline cells.
 }
 

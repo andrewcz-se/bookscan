@@ -10,7 +10,7 @@ export async function insertBook(db, book) {
     const existing = await db.books.where('isbn').equals(book.isbn).first();
     if (existing) return { book: existing, duplicate: true };
     const stamp = new Date().toISOString();
-    const record = { status: 'To Read', location: '', rating: null, notes: '', ...book, createdAt: stamp, updatedAt: stamp };
+    const record = { status: 'To Read', location: '', rating: null, notes: '', description: '', subjects: [], binding: '', edition: '', ...book, createdAt: stamp, updatedAt: stamp };
     const id = await db.books.add(record);
     return { book: { ...record, id }, duplicate: false };
   });
