@@ -166,21 +166,35 @@ async function processQueue() {
   }
 }
 
-function openModal(book) {
-  if (modalOpen) return;
-  editing = { ...book };
-  modalOpen = true;
-  returnFocus = document.activeElement;
-  scanner.suspend(true);
-  $('modal-title').textContent = book.id ? 'A closer look' : 'Add book details';
-  $('modal-eyebrow').textContent = book.id ? 'YOUR LIBRARY / EDIT BOOK' : 'ONE MORE DETAIL';
-  $('modal-description').textContent = book.id ? `ISBN ${book.isbn} · ${book.source || 'Manual'}${book.source === 'Open Library Search' ? ' · Work-level details; edition may differ.' : ''}` : 'We couldn’t retrieve a match. Add a title and any details you know to save this book.';
-  const cover = $('book-cover');
+function updateBookCover(book) {
+  let cover = $('book-cover');
+  // An older cached HTML document may load the newer app script. The optional
+  // cover must not prevent the existing detail form from opening in that case.
+  if (!cover) {
+    cover = element('img', 'detail-cover');
+    cover.id = 'book-cover';
+    cover.width = 88;
+    cover.height = 132;
+    cover.decoding = 'async';
+    cover.referrerPolicy = 'no-referrer';
+    const description = $('modal-description');
+    const summary = element('div', 'book-detail-summary');
+    description.before(summary);
+    summary.append(cover, description);
+  }
   cover.hidden = !book.id && !book.cover;
   cover.alt = `Cover of ${book.title || 'this book'}`;
   cover.onerror = () => { cover.onerror = null; cover.src = './assets/book-placeholder.svg'; };
   if (!cover.hidden) cover.src = safeCover(book.cover) || './assets/book-placeholder.svg';
   else cover.removeAttribute('src');
+}
+
+function openModal(book) {
+  if (modalOpen) return;
+  $('modal-title').textContent = book.id ? 'A closer look' : 'Add book details';
+  $('modal-eyebrow').textContent = book.id ? 'YOUR LIBRARY / EDIT BOOK' : 'ONE MORE DETAIL';
+  $('modal-description').textContent = book.id ? `ISBN ${book.isbn} · ${book.source || 'Manual'}${book.source === 'Open Library Search' ? ' · Work-level details; edition may differ.' : ''}` : 'We couldn’t retrieve a match. Add a title and any details you know to save this book.';
+  updateBookCover(book);
   const fields = { isbn: 'isbn', title: 'title', authors: 'authors', date: 'publish_date', publisher: 'publisher', pages: 'number_of_pages', description: 'description', binding: 'binding', edition: 'edition', status: 'status', location: 'location', notes: 'notes' };
   for (const [id, key] of Object.entries(fields)) $(`book-${id}`).value = book[key] ?? '';
   $('book-subjects').value = normalizeSubjects(book.subjects).join('\n');
@@ -191,6 +205,12 @@ function openModal(book) {
   document.querySelectorAll('[name="rating"]').forEach(input => { input.checked = Number(input.value) === book.rating; });
   updateStars();
   $('form-error').textContent = '';
+  // Commit modal state only after populating the form. A setup error must not
+  // leave an invisible modal blocking every subsequent card/Edit click.
+  editing = { ...book };
+  returnFocus = document.activeElement;
+  scanner.suspend(true);
+  modalOpen = true;
   $('modal').hidden = false;
   document.body.style.overflow = 'hidden';
   // aria-hidden also supports Safari versions predating native inert/dialog.
@@ -204,8 +224,8 @@ function closeModal() {
   modalOpen = false;
   editing = null;
   $('modal').hidden = true;
-  $('book-cover').onerror = null;
-  $('book-cover').removeAttribute('src');
+  const cover = $('book-cover');
+  if (cover) { cover.onerror = null; cover.removeAttribute('src'); }
   document.body.style.overflow = '';
   document.querySelector('main').removeAttribute('aria-hidden');
   document.querySelector('header').removeAttribute('aria-hidden');

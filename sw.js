@@ -1,6 +1,6 @@
 /* Increment this version whenever changing a shipped local file or dependency. */
 const PREFIX = `bookscan-${new URL(self.registration.scope).pathname}-`;
-const CACHE = `${PREFIX}v5`;
+const CACHE = `${PREFIX}v7`;
 const LOCAL = ['./', './index.html', './styles.css', './js/app.js', './js/isbn.js', './js/metadata.js', './js/db.js', './js/csv.js', './js/scanner.js', './manifest.webmanifest', './assets/icon.svg', './assets/icon-192.png', './assets/icon-512.png', './assets/book-placeholder.svg'];
 LOCAL.push('./js/barcode-camera.js', './js/barcode-worker.js', './js/barcode-decoder.js', './vendor/zxing-wasm/reader/index.js', './vendor/zxing-wasm/share.js', './vendor/zxing-wasm/reader/zxing_reader.wasm');
 const CDN = ['https://unpkg.com/dexie@4.0.11/dist/dexie.js', 'https://cdn.tailwindcss.com'];
